@@ -1,4 +1,7 @@
-import 'dotenv/config'
+import { config } from 'dotenv'
+import { join, dirname } from 'path'
+import { fileURLToPath } from 'url'
+config({ path: join(dirname(fileURLToPath(import.meta.url)), '../.env') })
 import { buildServer } from './api/server.js'
 import { runMigrations } from './db/sqlite.js'
 import { seedAdminIfEmpty } from './db/users.js'
