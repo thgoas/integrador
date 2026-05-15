@@ -23,7 +23,7 @@ function inferType(val: any): string {
 }
 
 async function getColumnTypes(client: any, tableName: string): Promise<Map<string, string>> {
-  const res = await client.query<{ column_name: string; data_type: string }>(
+  const res = await client.query(
     `SELECT column_name, data_type FROM information_schema.columns WHERE table_name = $1`,
     [tableName]
   )
