@@ -1,0 +1,35 @@
+{
+  "name": "integrador-backend",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@fastify/cors": "^9.0.1",
+    "@fastify/jwt": "^8.0.1",
+    "date-fns": "^3.6.0",
+    "dotenv": "^16.4.5",
+    "fastify": "^4.28.1",
+    "mssql": "^11.0.1",
+    "mysql2": "^3.10.0",
+    "p-limit": "^6.1.0",
+    "pg": "^8.12.0",
+    "pg-copy-streams": "^6.0.6",
+    "pg-query-stream": "^4.7.0",
+    "pino": "^9.3.2",
+    "pino-pretty": "^11.2.2",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/mssql": "^9.1.5",
+    "@types/node": "^22.0.0",
+    "@types/pg": "^8.11.6",
+    "@types/pg-copy-streams": "^1.2.5",
+    "tsx": "^4.16.2",
+    "typescript": "^5.5.4"
+  }
+}
