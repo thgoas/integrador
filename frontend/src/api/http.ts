@@ -27,8 +27,11 @@ export async function request<T>(path: string, options?: RequestInit): Promise<T
 
   if (res.status === 401) {
     clearToken()
-    window.location.href = '/login'
-    throw new Error('Sessão expirada')
+    if (!window.location.pathname.startsWith('/login')) {
+      window.location.href = '/login'
+    }
+    const body = await res.json().catch(() => null)
+    throw new Error(body?.error ?? 'Usuário ou senha incorretos')
   }
 
   if (!res.ok) {
