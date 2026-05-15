@@ -3,7 +3,7 @@ module.exports = {
     {
       name: 'integrador-api',
       script: 'dist/index.js',
-      cwd: '/home/<usuario>/integrador/backend',
+      cwd: '/home/thiago/integrador/backend',
       interpreter: 'node',
       interpreter_args: '--experimental-sqlite --env-file=.env',
       instances: 1,
