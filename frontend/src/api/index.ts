@@ -17,6 +17,11 @@ export const api = {
       }),
     me: () =>
       request<{ username: string }>('/auth/me'),
+    changePassword: (current_password: string, new_password: string) =>
+      request<{ ok: boolean }>('/auth/password', {
+        method: 'PUT',
+        body: JSON.stringify({ current_password, new_password }),
+      }),
   },
 
   connections: {

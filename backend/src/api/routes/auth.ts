@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify'
-import { findUser, verifyPassword } from '../../db/users.js'
+import { findUser, verifyPassword, updatePassword } from '../../db/users.js'
 
 export async function authRoutes(app: FastifyInstance) {
   app.post<{ Body: { username: string; password: string } }>(
@@ -20,4 +20,21 @@ export async function authRoutes(app: FastifyInstance) {
     const { username, id } = req.user as any
     return { id, username }
   })
+
+  app.put<{ Body: { current_password: string; new_password: string } }>(
+    '/auth/password',
+    async (req, reply) => {
+      const { username } = req.user as any
+      const { current_password, new_password } = req.body ?? {}
+      if (!new_password || new_password.length < 6) {
+        return reply.code(400).send({ error: 'Nova senha deve ter pelo menos 6 caracteres' })
+      }
+      const user = findUser(username)
+      if (!user || !verifyPassword(current_password, user.password)) {
+        return reply.code(401).send({ error: 'Senha atual incorreta' })
+      }
+      updatePassword(username, new_password)
+      return { ok: true }
+    }
+  )
 }
