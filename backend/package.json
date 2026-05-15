@@ -3,9 +3,9 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "NODE_OPTIONS=--experimental-sqlite tsx watch src/index.ts",
+    "dev": "node --experimental-sqlite --env-file=.env --import tsx/esm --watch src/index.ts",
     "build": "tsc && cp src/db/schema.sql dist/db/schema.sql",
-    "start": "NODE_OPTIONS=--experimental-sqlite node dist/index.js"
+    "start": "node --experimental-sqlite --env-file=.env dist/index.js"
   },
   "dependencies": {
     "@fastify/cors": "^9.0.1",
