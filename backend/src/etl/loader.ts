@@ -22,6 +22,28 @@ function inferType(val: any): string {
   return 'TEXT'
 }
 
+async function getColumnTypes(client: any, tableName: string): Promise<Map<string, string>> {
+  const res = await client.query<{ column_name: string; data_type: string }>(
+    `SELECT column_name, data_type FROM information_schema.columns WHERE table_name = $1`,
+    [tableName]
+  )
+  return new Map(res.rows.map((r: any) => [r.column_name, r.data_type]))
+}
+
+function sanitizeRow(row: Record<string, any>, colTypes: Map<string, string>): Record<string, any> {
+  const out: Record<string, any> = {}
+  for (const [col, val] of Object.entries(row)) {
+    const type = colTypes.get(col) ?? ''
+    if (val !== null && val !== undefined && /^(numeric|bigint|integer|smallint|real|double|decimal)/i.test(type)) {
+      const n = Number(val)
+      out[col] = isNaN(n) ? null : val
+    } else {
+      out[col] = val
+    }
+  }
+  return out
+}
+
 export async function ensureTable(
   destinationTable: string,
   columns: string[],
@@ -71,7 +93,13 @@ export async function deletePeriod(
   return result.rowCount ?? 0
 }
 
-async function copyToTable(client: any, targetTable: string, columns: string[], rows: Record<string, any>[]): Promise<void> {
+async function copyToTable(
+  client: any,
+  targetTable: string,
+  columns: string[],
+  rows: Record<string, any>[],
+  colTypes?: Map<string, string>
+): Promise<void> {
   const colList = columns.map(c => `"${c}"`).join(', ')
   await new Promise<void>((resolve, reject) => {
     const stream = client.query(
@@ -81,7 +109,8 @@ async function copyToTable(client: any, targetTable: string, columns: string[], 
     stream.on('finish', resolve)
     const writeAll = async () => {
       for (const row of rows) {
-        const line = columns.map(col => formatCsvValue(row[col])).join(',') + '\n'
+        const finalRow = colTypes ? sanitizeRow(row, colTypes) : row
+        const line = columns.map(col => formatCsvValue(finalRow[col])).join(',') + '\n'
         if (!stream.write(line)) await new Promise<void>(r => stream.once('drain', r))
       }
       stream.end()
@@ -90,7 +119,6 @@ async function copyToTable(client: any, targetTable: string, columns: string[], 
   })
 }
 
-// Direct insert — usado quando não há code_column nem deduplicação necessária
 export async function copyChunkToTable(
   destinationTable: string,
   columns: string[],
@@ -98,13 +126,13 @@ export async function copyChunkToTable(
 ): Promise<void> {
   const client = await destPool.connect()
   try {
-    await copyToTable(client, destinationTable, columns, rows)
+    const colTypes = await getColumnTypes(client, destinationTable)
+    await copyToTable(client, destinationTable, columns, rows, colTypes)
   } finally {
     client.release()
   }
 }
 
-// Upsert — COPY para staging temporário, depois INSERT ON CONFLICT DO UPDATE
 export async function upsertChunkToTable(
   destinationTable: string,
   codeColumn: string,
@@ -121,8 +149,9 @@ export async function upsertChunkToTable(
   const client = await destPool.connect()
   try {
     await client.query('BEGIN')
+    const colTypes = await getColumnTypes(client, destinationTable)
     await client.query(`CREATE TEMP TABLE "${stagingTable}" (LIKE "${destinationTable}") ON COMMIT DROP`)
-    await copyToTable(client, stagingTable, columns, rows)
+    await copyToTable(client, stagingTable, columns, rows, colTypes)
     await client.query(`
       INSERT INTO "${destinationTable}" (${colList})
       SELECT ${colList} FROM "${stagingTable}"
