@@ -52,5 +52,12 @@ CREATE TABLE IF NOT EXISTS run_logs (
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS users (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  username    TEXT NOT NULL UNIQUE,
+  password    TEXT NOT NULL,
+  created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE INDEX IF NOT EXISTS idx_runs_job_id ON runs(job_id);
 CREATE INDEX IF NOT EXISTS idx_run_logs_run_id ON run_logs(run_id);

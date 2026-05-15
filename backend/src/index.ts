@@ -1,12 +1,14 @@
 import 'dotenv/config'
 import { buildServer } from './api/server.js'
 import { runMigrations } from './db/sqlite.js'
+import { seedAdminIfEmpty } from './db/users.js'
 import { startScheduler } from './scheduler/cron.js'
 import { env } from './config/env.js'
 import { destPool } from './config/destination.js'
 
 async function main() {
   runMigrations()
+  seedAdminIfEmpty(env.APP_USER, env.APP_PASSWORD)
 
   // Verify destination PostgreSQL is reachable at startup
   try {

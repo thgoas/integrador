@@ -10,7 +10,7 @@ const schema = z.object({
   ENCRYPT_KEY: z.string().min(32, 'ENCRYPT_KEY must be at least 32 characters'),
   JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 characters'),
   APP_USER: z.string().default('admin'),
-  APP_PASSWORD: z.string().min(6, 'APP_PASSWORD must be at least 6 characters'),
+  APP_PASSWORD: z.string().min(1).default('admin123'),
 })
 
 export const env = schema.parse(process.env)
