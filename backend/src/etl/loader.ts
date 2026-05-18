@@ -35,8 +35,9 @@ function sanitizeRow(row: Record<string, any>, colTypes: Map<string, string>): R
   for (const [col, val] of Object.entries(row)) {
     const type = colTypes.get(col) ?? ''
     if (val !== null && val !== undefined && /^(numeric|bigint|integer|smallint|real|double|decimal)/i.test(type)) {
-      const n = Number(val)
-      out[col] = isNaN(n) ? null : val
+      const trimmed = typeof val === 'string' ? val.trim() : val
+      const n = Number(trimmed)
+      out[col] = (trimmed === '' || isNaN(n)) ? null : val
     } else {
       out[col] = val
     }
