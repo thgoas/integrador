@@ -14,6 +14,9 @@ export function JobDetail() {
   const [reprocessModal, setReprocessModal] = useState(false)
   const [repFrom, setRepFrom] = useState('')
   const [repTo, setRepTo] = useState('')
+  const [repError, setRepError] = useState('')
+  const [repLoading, setRepLoading] = useState(false)
+  const [actionError, setActionError] = useState('')
 
   const load = async () => {
     const [j, r] = await Promise.all([api.jobs.get(Number(id)), api.runs.listByJob(Number(id))])
@@ -30,19 +33,32 @@ export function JobDetail() {
   }, [id])
 
   const start = async () => {
-    const r = await api.jobs.start(Number(id))
-    setActiveRunId(r.run_id)
-    load()
+    setActionError('')
+    try {
+      const r = await api.jobs.start(Number(id))
+      setActiveRunId(r.run_id)
+      load()
+    } catch (err: any) { setActionError(err.message) }
   }
 
   const stop = async () => { await api.jobs.stop(Number(id)); load() }
 
   const reprocess = async (e: React.FormEvent) => {
     e.preventDefault()
-    const r = await api.jobs.reprocess(Number(id), repFrom, repTo)
-    setActiveRunId(r.run_id)
-    setReprocessModal(false)
-    load()
+    setRepError('')
+    setRepLoading(true)
+    try {
+      const r = await api.jobs.reprocess(Number(id), repFrom, repTo)
+      setActiveRunId(r.run_id)
+      setReprocessModal(false)
+      setRepFrom('')
+      setRepTo('')
+      load()
+    } catch (err: any) {
+      setRepError(err.message)
+    } finally {
+      setRepLoading(false)
+    }
   }
 
   if (!job) return <div style={s.page}><p style={{ color: '#64748b' }}>Carregando...</p></div>
@@ -61,11 +77,13 @@ export function JobDetail() {
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <Link to={`/jobs/${id}/edit`} style={{ ...s.btnGhost, textDecoration: 'none', display: 'inline-block' }}>Editar</Link>
-          <button style={s.btnGhost} onClick={() => setReprocessModal(true)}>↻ Reprocessar período</button>
+          <button style={s.btnGhost} onClick={() => { setReprocessModal(true); setRepError('') }}>↻ Reprocessar período</button>
           {job.status === 'running'
             ? <button style={s.btnDanger} onClick={stop}>Parar</button>
             : <button style={s.btnSuccess} onClick={start}>▶ Iniciar</button>
           }
+        </div>
+        {actionError && <p style={{ color: '#ef4444', fontSize: 13, margin: '8px 0 0' }}>{actionError}</p>}
         </div>
       </div>
 
@@ -159,9 +177,12 @@ export function JobDetail() {
               <label style={s.label}>Data final
                 <input style={s.input} type="date" value={repTo} onChange={e => setRepTo(e.target.value)} required />
               </label>
+              {repError && <p style={{ color: '#ef4444', fontSize: 13, margin: 0 }}>{repError}</p>}
               <div style={{ display: 'flex', gap: 8 }}>
-                <button style={s.btn} type="submit">Executar</button>
-                <button style={s.btnGhost} type="button" onClick={() => setReprocessModal(false)}>Cancelar</button>
+                <button style={s.btn} type="submit" disabled={repLoading}>
+                  {repLoading ? 'Executando...' : 'Executar'}
+                </button>
+                <button style={s.btnGhost} type="button" onClick={() => setReprocessModal(false)} disabled={repLoading}>Cancelar</button>
               </div>
             </form>
           </div>
