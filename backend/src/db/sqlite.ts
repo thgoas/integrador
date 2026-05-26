@@ -39,6 +39,7 @@ export function runMigrations() {
     "ALTER TABLE jobs ADD COLUMN api_next_path TEXT",
     "ALTER TABLE jobs ADD COLUMN api_config TEXT",
     "ALTER TABLE jobs ADD COLUMN webhook_url TEXT",
+    "ALTER TABLE jobs ADD COLUMN field_mapping TEXT",
   ]
   for (const sql of alterations) {
     try { db.exec(sql) } catch { /* column already exists */ }

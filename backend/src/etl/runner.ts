@@ -4,7 +4,9 @@ import { getDb } from '../db/sqlite.js'
 import { generatePeriods } from './periods.js'
 import { renderTemplate } from './template.js'
 import { extractChunked } from './extractor.js'
+import { extractApiChunked } from './api-extractor.js'
 import { ensureTable, syncColumns, deletePeriod, copyChunkToTable, upsertChunkToTable } from './loader.js'
+import { applyMapping } from './transform.js'
 import { broadcastLog } from '../api/sse.js'
 
 function resolveDates(job: any): { date_from: string; date_to: string } {
@@ -20,6 +22,27 @@ function resolveDates(job: any): { date_from: string; date_to: string } {
 }
 
 const activeJobs = new Map<number, AbortController>()
+
+function callWebhook(job: any, runId: number, status: string, logFn: typeof log) {
+  if (!job.webhook_url) return
+  const db = getDb()
+  const run = db.prepare('SELECT * FROM runs WHERE id = ?').get(runId) as any
+  fetch(job.webhook_url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      job_id: job.id,
+      job_name: job.name,
+      run_id: runId,
+      status,
+      rows_read: run?.rows_read ?? 0,
+      rows_written: run?.rows_written ?? 0,
+      started_at: run?.started_at,
+      finished_at: run?.finished_at,
+    }),
+    signal: AbortSignal.timeout(10000),
+  }).catch((err: Error) => logFn(runId, 'warn', `Webhook falhou: ${err.message}`))
+}
 
 function log(runId: number, level: 'info' | 'warn' | 'error', message: string) {
   const db = getDb()
@@ -76,17 +99,54 @@ async function runPipeline(job: any, runId: number, signal: AbortSignal) {
       limit(async () => {
         if (signal.aborted) return
 
-        let sql: string
-        try {
-          sql = renderTemplate(job.sql_template, {
-            data_inicio: period.from,
-            data_fim: period.to,
-            loja: job.loja ?? '',
-            schema: job.schema ?? '',
-          })
-        } catch (err: any) {
-          log(runId, 'error', `Erro no template: ${err.message}`)
-          return
+        const templateVars = {
+          data_inicio: period.from,
+          data_fim: period.to,
+          loja: job.loja ?? '',
+          schema: job.schema ?? '',
+        }
+
+        let chunkStream: AsyncGenerator<Record<string, any>[]>
+
+        if (job.source_type === 'api') {
+          let endpoint: string
+          try {
+            endpoint = renderTemplate(job.api_endpoint ?? '', templateVars)
+          } catch (err: any) {
+            log(runId, 'error', `Erro no template do endpoint: ${err.message}`)
+            return
+          }
+          const method = (job.api_method ?? 'GET').toUpperCase()
+          let body: string | null = null
+          if (['POST', 'PUT', 'PATCH'].includes(method) && job.sql_template) {
+            try {
+              body = renderTemplate(job.sql_template, templateVars)
+            } catch (err: any) {
+              log(runId, 'error', `Erro no template do body: ${err.message}`)
+              return
+            }
+          }
+          let apiConfig: Record<string, any> = {}
+          try { if (job.api_config) apiConfig = JSON.parse(job.api_config) } catch {}
+          chunkStream = extractApiChunked(job.api_connection_id, endpoint, {
+            method,
+            body,
+            data_path: job.api_data_path ?? '',
+            pagination_type: job.api_pagination_type ?? 'none',
+            page_param: job.api_page_param ?? 'page',
+            page_size: job.api_page_size ?? 100,
+            next_path: job.api_next_path ?? null,
+            api_config: apiConfig,
+          }, job.chunk_size ?? 5000)
+        } else {
+          let sql: string
+          try {
+            sql = renderTemplate(job.sql_template, templateVars)
+          } catch (err: any) {
+            log(runId, 'error', `Erro no template: ${err.message}`)
+            return
+          }
+          chunkStream = extractChunked(job.connection_id, sql, job.chunk_size ?? 5000)
         }
 
         log(runId, 'info', `Extraindo ${period.from} → ${period.to}`)
@@ -95,9 +155,14 @@ async function runPipeline(job: any, runId: number, signal: AbortSignal) {
 
         try {
           let chunkIndex = 0
-          for await (const chunk of extractChunked(job.connection_id, sql, job.chunk_size ?? 5000)) {
+          let mappingConfig: import('./transform.js').MappingConfig | null = null
+          try { if (job.field_mapping) mappingConfig = JSON.parse(job.field_mapping) } catch {}
+
+          for await (let chunk of chunkStream) {
             if (signal.aborted) break
             if (chunk.length === 0) continue
+
+            if (mappingConfig) chunk = applyMapping(chunk, mappingConfig)
 
             // First chunk: create/verify table then delete the period
             if (!tableReady) {
@@ -167,10 +232,12 @@ async function runPipeline(job: any, runId: number, signal: AbortSignal) {
     db.prepare("UPDATE runs SET status = ?, finished_at = CURRENT_TIMESTAMP WHERE id = ?").run(finalStatus, runId)
     db.prepare("UPDATE jobs SET status = 'idle', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(job.id)
     log(runId, 'info', `Job finalizado: ${finalStatus}`)
+    callWebhook(job, runId, finalStatus, log)
   } catch (err: any) {
     db.prepare("UPDATE runs SET status = 'failed', error_msg = ?, finished_at = CURRENT_TIMESTAMP WHERE id = ?").run(err.message, runId)
     db.prepare("UPDATE jobs SET status = 'idle', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(job.id)
     log(runId, 'error', `Erro fatal: ${err.message}`)
+    callWebhook(job, runId, 'failed', log)
   } finally {
     activeJobs.delete(job.id)
   }

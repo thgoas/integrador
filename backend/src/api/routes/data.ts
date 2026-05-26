@@ -1,5 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { destPool } from '../../config/destination.js'
+import { applyMapping } from '../../etl/transform.js'
+import type { MappingConfig } from '../../etl/transform.js'
 
 const RESERVED = new Set(['limit', 'offset', 'order_by', 'order_dir'])
 
@@ -131,20 +133,43 @@ export async function dataRoutes(app: FastifyInstance) {
     }
   })
 
-  app.post<{ Params: { table: string }; Body: Record<string, any> | Record<string, any>[] }>(
+  app.post<{
+    Params: { table: string }
+    Body: Record<string, any> | Record<string, any>[] | { rows: Record<string, any>[]; mapping?: MappingConfig }
+  }>(
     '/data/:table',
     async (req, reply) => {
-      const rows = Array.isArray(req.body) ? req.body : [req.body]
+      const body = req.body as any
+      let rows: Record<string, any>[]
+      let mapping: MappingConfig | undefined
+
+      if (Array.isArray(body)) {
+        rows = body
+      } else if (body?.rows !== undefined) {
+        rows = Array.isArray(body.rows) ? body.rows : [body.rows]
+        mapping = body.mapping
+      } else {
+        rows = [body]
+      }
+
       if (rows.length === 0) return reply.code(400).send({ error: 'No rows provided' })
 
+      if (mapping) {
+        try {
+          rows = applyMapping(rows, mapping)
+        } catch (err: any) {
+          return reply.code(400).send({ error: `Mapping error: ${err.message}` })
+        }
+      }
+
+      const table = req.params.table.replace(/[^a-zA-Z0-9_]/g, '')
       const columns = Object.keys(rows[0])
       const placeholders = rows.map((_, i) =>
         `(${columns.map((_, j) => `$${i * columns.length + j + 1}`).join(',')})`
       ).join(',')
       const values = rows.flatMap(r => columns.map(c => r[c]))
-      const table = req.params.table.replace(/[^a-zA-Z0-9_]/g, '')
 
-      const query = `INSERT INTO ${table} (${columns.join(',')}) VALUES ${placeholders}`
+      const query = `INSERT INTO "${table}" (${columns.map(c => `"${c}"`).join(',')}) VALUES ${placeholders}`
       await destPool.query(query, values)
 
       return { ok: true, inserted: rows.length }
