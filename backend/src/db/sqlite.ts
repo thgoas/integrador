@@ -28,8 +28,30 @@ export function runMigrations() {
     "ALTER TABLE jobs ADD COLUMN date_column TEXT",
     "ALTER TABLE jobs ADD COLUMN code_column TEXT",
     "ALTER TABLE jobs ADD COLUMN date_mode TEXT NOT NULL DEFAULT 'fixed'",
+    "ALTER TABLE jobs ADD COLUMN source_type TEXT NOT NULL DEFAULT 'db'",
+    "ALTER TABLE jobs ADD COLUMN api_connection_id INTEGER",
+    "ALTER TABLE jobs ADD COLUMN api_endpoint TEXT",
+    "ALTER TABLE jobs ADD COLUMN api_method TEXT DEFAULT 'GET'",
+    "ALTER TABLE jobs ADD COLUMN api_data_path TEXT",
+    "ALTER TABLE jobs ADD COLUMN api_pagination_type TEXT DEFAULT 'none'",
+    "ALTER TABLE jobs ADD COLUMN api_page_param TEXT DEFAULT 'page'",
+    "ALTER TABLE jobs ADD COLUMN api_page_size INTEGER DEFAULT 100",
+    "ALTER TABLE jobs ADD COLUMN api_next_path TEXT",
+    "ALTER TABLE jobs ADD COLUMN api_config TEXT",
+    "ALTER TABLE jobs ADD COLUMN webhook_url TEXT",
   ]
   for (const sql of alterations) {
     try { db.exec(sql) } catch { /* column already exists */ }
   }
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS api_tokens (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name         TEXT NOT NULL,
+      token_hash   TEXT NOT NULL UNIQUE,
+      last_used_at DATETIME,
+      created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `)
 }

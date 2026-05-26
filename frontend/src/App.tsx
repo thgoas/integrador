@@ -7,6 +7,8 @@ import { Jobs } from './pages/Jobs'
 import { JobForm } from './pages/JobForm'
 import { JobDetail } from './pages/JobDetail'
 import { Connections } from './pages/Connections'
+import { ApiConnections } from './pages/ApiConnections'
+import { ApiTokens } from './pages/ApiTokens'
 
 const navStyle = (active: boolean): React.CSSProperties => ({
   display: 'block', padding: '8px 16px', borderRadius: 6, textDecoration: 'none',
@@ -87,7 +89,9 @@ function AppShell({ onLogout }: { onLogout: () => void }) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1 }}>
           <NavLink to="/" end style={({ isActive }) => navStyle(isActive)}>Dashboard</NavLink>
           <NavLink to="/jobs" style={({ isActive }) => navStyle(isActive)}>Jobs</NavLink>
-          <NavLink to="/connections" style={({ isActive }) => navStyle(isActive)}>Conexões</NavLink>
+          <NavLink to="/connections" style={({ isActive }) => navStyle(isActive)}>Conexões DB</NavLink>
+          <NavLink to="/api-connections" style={({ isActive }) => navStyle(isActive)}>Conexões API</NavLink>
+          <NavLink to="/tokens" style={({ isActive }) => navStyle(isActive)}>Tokens de API</NavLink>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <button style={btnNav} onClick={() => setChangePwd(true)}>Trocar senha</button>
@@ -104,6 +108,8 @@ function AppShell({ onLogout }: { onLogout: () => void }) {
           <Route path="/jobs/:id" element={<JobDetail />} />
           <Route path="/jobs/:id/edit" element={<JobForm />} />
           <Route path="/connections" element={<Connections />} />
+          <Route path="/api-connections" element={<ApiConnections />} />
+          <Route path="/tokens" element={<ApiTokens />} />
         </Routes>
       </main>
     </div>
