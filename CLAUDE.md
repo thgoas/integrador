@@ -1,6 +1,6 @@
 # Integrador — ETL Manager
 
-Aplicação para gerenciar jobs de ETL: extrai dados de bancos SQL de origem (SQL Server, MySQL, PostgreSQL), processa em janelas de período e grava no PostgreSQL de destino (alimenta Power BI).
+Aplicação para gerenciar jobs de ETL: extrai dados de bancos SQL ou APIs REST/GraphQL de origem, processa em janelas de período e grava no PostgreSQL de destino (alimenta Power BI). Também expõe os dados gravados via API de leitura.
 
 ## Como rodar
 
@@ -15,6 +15,8 @@ cd frontend && npm run dev
 Acesse: http://localhost:5173  
 Login padrão: `admin` / `admin123`
 
+> **Node 25+**: `tsx/esm` tem incompatibilidade com `pino-pretty` no Node 25. Use `npm run build && node --experimental-sqlite --env-file=.env dist/index.js` para rodar o backend compilado.
+
 ## Stack
 
 | Camada | Tecnologia |
@@ -22,11 +24,12 @@ Login padrão: `admin` / `admin123`
 | Backend | Node.js 22+ + TypeScript + Fastify 4 |
 | Banco local | SQLite via `node:sqlite` (built-in Node 22) |
 | Frontend | React + Vite + TypeScript |
-| Origem | `mssql` / `mysql2` / `pg` + `pg-query-stream` |
+| Origem DB | `mssql` / `mysql2` / `pg` + `pg-query-stream` |
+| Origem API | `fetch` nativo (Node 22+) |
 | Destino | `pg` + `pg-copy-streams` (protocolo COPY) |
 | Paralelismo | `p-limit` |
 | Auth | JWT via `@fastify/jwt` v8 (v8, não v10 — requer Fastify 4) |
-| Criptografia | AES-256-CBC para senhas das conexões |
+| Criptografia | AES-256-CBC para senhas/tokens das conexões |
 | Datas | `date-fns` |
 
 ## Estrutura
@@ -34,46 +37,51 @@ Login padrão: `admin` / `admin123`
 ```
 backend/src/
   api/
-    server.ts           # Fastify + plugins + auth hook global
+    server.ts               # Fastify + plugins + auth hook global
     routes/
-      auth.ts           # POST /auth/login, GET /auth/me
-      connections.ts    # CRUD conexões + POST /test
-      jobs.ts           # CRUD jobs + start/stop/reprocess
-      runs.ts           # GET runs + polling de logs
-      data.ts           # POST /data/:table (inserção manual)
-    sse.ts              # broadcast SSE (mantido, sem subscribers ativos)
+      auth.ts               # POST /auth/login, GET /auth/me
+      connections.ts        # CRUD conexões DB + POST /test
+      api-connections.ts    # CRUD conexões API + POST /test
+      jobs.ts               # CRUD jobs + start/stop/reprocess
+      runs.ts               # GET runs + polling de logs
+      data.ts               # GET /data (lista tabelas), GET /data/:table/columns, GET /data/:table (filtros dinâmicos), POST /data/:table
+      tokens.ts             # CRUD tokens de API — POST/GET/DELETE /auth/tokens
+    sse.ts                  # broadcast SSE (mantido, sem subscribers ativos)
   db/
-    sqlite.ts           # Singleton DatabaseSync + runMigrations()
-    schema.sql          # DDL das 4 tabelas SQLite
-    crypto.ts           # encrypt/decrypt AES para senhas
+    sqlite.ts               # Singleton DatabaseSync + runMigrations()
+    schema.sql              # DDL das tabelas SQLite
+    crypto.ts               # encrypt/decrypt AES para senhas
   etl/
-    runner.ts           # Orquestra pipeline: p-limit + AbortController
-    template.ts         # Substitui {{variavel}} no SQL
-    periods.ts          # Gera janelas day/week/month
-    extractor.ts        # Stream chunked por tipo de DB
-    loader.ts           # ensureTable, upsertChunkToTable, copyChunkToTable, deletePeriod
+    runner.ts               # Orquestra pipeline: p-limit + AbortController + webhook
+    template.ts             # Substitui {{variavel}} no SQL/endpoint
+    periods.ts              # Gera janelas day/week/month
+    extractor.ts            # Stream chunked por tipo de DB
+    api-extractor.ts        # Extração via HTTP: REST paginado, cursor, offset, GraphQL
+    loader.ts               # ensureTable, upsertChunkToTable, copyChunkToTable, deletePeriod
   scheduler/
-    cron.ts             # Avalia jobs a cada minuto (cron + reprocessamento mensal)
+    cron.ts                 # Avalia jobs a cada minuto (cron + reprocessamento mensal)
   config/
-    env.ts              # Zod: valida variáveis de ambiente
-    destination.ts      # Pool pg para o PostgreSQL destino
+    env.ts                  # Zod: valida variáveis de ambiente
+    destination.ts          # Pool pg para o PostgreSQL destino
 
 frontend/src/
   api/
-    http.ts             # fetch wrapper + getToken/setToken/clearToken
-    types.ts            # Interfaces: Connection, Job, Run, RunLog
-    index.ts            # api.auth.*, api.jobs.*, api.connections.*, api.runs.*
+    http.ts                 # fetch wrapper + getToken/setToken/clearToken
+    types.ts                # Interfaces: Connection, ApiConnection, Job, Run, RunLog, ApiToken
+    index.ts                # api.auth.*, api.jobs.*, api.connections.*, api.apiConnections.*, api.runs.*, api.data.*, api.tokens.*
   components/
     StatusBadge.tsx
-    RunLogViewer.tsx    # Polling a cada 2s enquanto run está ativo
+    RunLogViewer.tsx        # Polling a cada 2s enquanto run está ativo
   pages/
     Login.tsx
     Dashboard.tsx
     Jobs.tsx
-    JobForm.tsx         # Criar/editar job
-    JobDetail.tsx       # Logs em tempo real + histórico de runs
-    Connections.tsx
-  styles.ts             # Objeto `s` com estilos inline centralizados
+    JobForm.tsx             # Criar/editar job (suporta source_type: db | api)
+    JobDetail.tsx           # Logs em tempo real + histórico de runs
+    Connections.tsx         # Conexões de banco de dados
+    ApiConnections.tsx      # Conexões de API (REST/GraphQL)
+    ApiTokens.tsx           # Gerenciamento de tokens de API (criar, listar, revogar)
+  styles.ts                 # Objeto `s` com estilos inline centralizados
 ```
 
 ## Variáveis de ambiente (backend/.env)
@@ -93,11 +101,22 @@ APP_PASSWORD=admin123
 
 ## Schema SQLite (banco local)
 
-Tabelas: `connections`, `jobs`, `runs`, `run_logs`.
+Tabelas: `connections`, `api_connections`, `jobs`, `runs`, `run_logs`, `users`, `api_tokens`.
 
 Colunas adicionadas via migration incremental (try/catch em ALTER TABLE):
 - `jobs.date_column` — coluna no destino usada para DELETE por período
 - `jobs.code_column` — coluna única para upsert (ON CONFLICT DO UPDATE)
+- `jobs.source_type` — `'db'` (padrão) ou `'api'`
+- `jobs.api_connection_id` — FK para `api_connections`
+- `jobs.api_endpoint` — template de endpoint, ex: `/sales?from={{data_inicio}}&to={{data_fim}}`
+- `jobs.api_method` — `GET`, `POST`, `PUT` etc.
+- `jobs.api_data_path` — caminho dot-notation para o array na resposta, ex: `data.items`
+- `jobs.api_pagination_type` — `none` / `page` / `offset` / `cursor`
+- `jobs.api_page_param` — nome do parâmetro de página/cursor
+- `jobs.api_page_size` — tamanho da página
+- `jobs.api_next_path` — dot-notation para o próximo cursor na resposta
+- `jobs.api_config` — JSON livre para overrides avançados (ver abaixo)
+- `jobs.webhook_url` — URL chamada via POST após cada run
 
 ## Fluxo ETL
 
@@ -107,10 +126,12 @@ POST /api/jobs/:id/start
   ├── Gera janelas de período (day/week/month)
   └── p-limit(concurrency): para cada janela em paralelo
         ├── renderTemplate → substitui {{data_inicio}}, {{data_fim}}, {{loja}}, {{schema}}
-        ├── extractChunked → stream de chunks da origem
+        ├── Se source_type='db':  extractChunked (stream SQL)
+        │   Se source_type='api': extractApiChunked (HTTP paginado)
         ├── Primeiro chunk: ensureTable + syncColumns (unique index se code_column)
         ├── Se code_column → upsertChunkToTable (staging COPY + ON CONFLICT DO UPDATE)
         └── Senão → deletePeriod + copyChunkToTable (DELETE + COPY direto)
+  └── Após finalizar: chama webhook_url se configurado
 ```
 
 ## Estratégias de deduplicação
@@ -121,11 +142,90 @@ POST /api/jobs/:id/start
 | Só `date_column` | DELETE período + INSERT direto |
 | Nenhuma | INSERT puro (pode duplicar em re-runs) |
 
-## Template SQL
+## Template SQL / Endpoint
 
-Variáveis disponíveis: `{{data_inicio}}`, `{{data_fim}}`, `{{schema}}`, `{{loja}}`
+Variáveis disponíveis em `sql_template` (DB) e `api_endpoint` (API):
+`{{data_inicio}}`, `{{data_fim}}`, `{{schema}}`, `{{loja}}`
 
 `{{loja}}` aceita vírgulas (`001,002,003`) e renderiza como lista SQL `'001', '002', '003'` — use com `IN ({{loja}})`.
+
+Para jobs API com método POST, o `sql_template` é o body da requisição (JSON ou GraphQL query).
+
+## Conexões API (`api_connections`)
+
+| Campo | Descrição |
+|---|---|
+| `base_url` | URL base, ex: `https://api.exemplo.com/v1` |
+| `auth_type` | `none` / `bearer` / `apikey` / `basic` |
+| `auth_header` | Nome do header para `apikey`, ex: `X-API-Key` |
+| `auth_value` | Token/senha — armazenado criptografado (AES-256-CBC) |
+| `headers` | JSON com headers extras opcionais |
+
+## Config avançada de API (`api_config` — JSON)
+
+| Chave | Efeito |
+|---|---|
+| `"graphql": true` | Encapsula o body em `{"query": "...", "variables": {...}}` |
+| `"variables": {...}` | Variáveis extras para GraphQL |
+| `"page_size_param": "per_page"` | Nome do parâmetro de tamanho de página (padrão: `limit`) |
+| `"first_page": 0` | Primeira página (padrão: `1`) |
+| `"offset_param": "skip"` | Nome do parâmetro de offset (padrão: `offset`) |
+| `"limit_param": "take"` | Nome do parâmetro de limite para offset (padrão: `limit`) |
+
+## API de leitura dos dados
+
+```
+GET /api/data
+→ { tables: [{ name, row_estimate }] }
+
+GET /api/data/:table/columns
+→ { table, columns: [{ name, type, position, nullable }] }
+
+GET /api/data/:table?limit=100&offset=0&order_by=col&order_dir=asc|desc&[filtros]
+→ { data: [...], total: N, limit: N, offset: N }
+```
+
+Lê do PostgreSQL destino. Requer JWT **ou token de API** (`itg_...`). Limite máximo: 10.000 linhas.
+
+### Filtros dinâmicos em GET /api/data/:table
+
+| Sufixo | Operador | Exemplo |
+|--------|----------|---------|
+| `col=valor` | `=` | `?status=ativo` |
+| `col__gt=valor` | `>` | `?valor__gt=1000` |
+| `col__gte=valor` | `>=` | `?data__gte=2024-01-01` |
+| `col__lt=valor` | `<` | `?data__lt=2024-12-31` |
+| `col__lte=valor` | `<=` | `?preco__lte=500` |
+| `col__like=valor` | `ILIKE` | `?nome__like=João%` |
+| `col__in=v1,v2` | `= ANY(...)` | `?status__in=ativo,inativo` |
+| `col__null=true` | `IS NULL` | `?obs__null=true` |
+
+## Tokens de API
+
+Tokens de longa duração para integrar Power BI e sistemas externos sem precisar de login periódico.
+
+```
+POST /api/auth/tokens   { name }    → { id, name, token: "itg_<64hex>" }   (token exibido só uma vez)
+GET  /api/auth/tokens               → [{ id, name, last_used_at, created_at }]
+DELETE /api/auth/tokens/:id         → { ok: true }
+```
+
+- **Formato:** `itg_<64 hex chars>` — armazenado como hash SHA-256 (valor bruto nunca persiste)
+- **Escopo restrito:** apenas `GET /api/data/*` — qualquer outra rota retorna 403
+- **Sem expiração** — válido até revogação manual
+- **Uso:** `Authorization: Bearer itg_<valor>`
+- `last_used_at` atualizado a cada requisição autenticada via token
+
+## Webhook pós-execução
+
+Se `webhook_url` estiver configurado no job, após cada run o backend faz:
+```
+POST <webhook_url>
+Content-Type: application/json
+
+{ job_id, job_name, run_id, status, rows_read, rows_written, started_at, finished_at }
+```
+Timeout de 10s. Falhas são registradas nos logs do run (nível `warn`), não interrompem o fluxo.
 
 ## Decisões técnicas importantes
 
@@ -135,8 +235,12 @@ Variáveis disponíveis: `{{data_inicio}}`, `{{data_fim}}`, `{{schema}}`, `{{loj
 - **COPY direto ao destino** — staging table removida; mais simples pois não há unique key universal
 - **Upsert via temp table** — COPY para `_stg_<tabela>` na mesma transação, depois INSERT ON CONFLICT
 - **Content-Type condicional** — header `application/json` só enviado quando há body (corrige FST_ERR_CTP_EMPTY_JSON_BODY em DELETE)
-- **Senhas criptografadas** — AES-256-CBC com ENCRYPT_KEY do .env
+- **Senhas/tokens criptografados** — AES-256-CBC com ENCRYPT_KEY do .env (tanto conexões DB quanto API)
 - **Tabela destino auto-criada** — tipos inferidos do primeiro chunk (`Date` → TIMESTAMPTZ, int → BIGINT, etc.)
+- **`fetch` nativo para APIs** — Node 22+ tem fetch global; sem dependência externa para o extrator de API
+- **`api_connections` tabela separada** — evita alterar CHECK constraint da tabela `connections` no SQLite
+- **Tokens de API com hash SHA-256** — valor bruto nunca persiste; escopo restrito a GET /api/data/* para segurança
+- **Filtros dinâmicos via query string** — operadores sufixados (`__gt`, `__like`, `__in` etc.) com whitelist fixa, valores sempre parametrizados
 
 ## Agendamento
 
