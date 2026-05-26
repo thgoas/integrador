@@ -58,6 +58,7 @@ backend/src/
     extractor.ts            # Stream chunked por tipo de DB
     api-extractor.ts        # Extração via HTTP: REST paginado, cursor, offset, GraphQL
     loader.ts               # ensureTable, upsertChunkToTable, copyChunkToTable, deletePeriod
+    transform.ts            # applyMapping(rows, config): select, rename, cast, fixed
   scheduler/
     cron.ts                 # Avalia jobs a cada minuto (cron + reprocessamento mensal)
   config/
@@ -117,6 +118,7 @@ Colunas adicionadas via migration incremental (try/catch em ALTER TABLE):
 - `jobs.api_next_path` — dot-notation para o próximo cursor na resposta
 - `jobs.api_config` — JSON livre para overrides avançados (ver abaixo)
 - `jobs.webhook_url` — URL chamada via POST após cada run
+- `jobs.field_mapping` — JSON com config de transformação de campos (ver abaixo)
 
 ## Fluxo ETL
 
@@ -215,6 +217,42 @@ DELETE /api/auth/tokens/:id         → { ok: true }
 - **Sem expiração** — válido até revogação manual
 - **Uso:** `Authorization: Bearer itg_<valor>`
 - `last_used_at` atualizado a cada requisição autenticada via token
+
+## Mapeamento de campos (`field_mapping` — JSON)
+
+Transforma os dados antes de gravar no PostgreSQL destino. Aplicado em cada chunk do ETL e no `POST /api/data/:table` (via campo `mapping` no body).
+
+```json
+{
+  "select": ["id_pedido", "valor_bruto", "dt_emissao"],
+  "rename": { "id_pedido": "pedido_id", "valor_bruto": "valor" },
+  "cast":   { "valor": "number", "dt_emissao": "date" },
+  "fixed":  { "sistema": "ERP", "pais": "BR" }
+}
+```
+
+| Chave | Efeito |
+|-------|--------|
+| `select` | Whitelist de campos da origem; omitir = todos |
+| `rename` | `campo_origem → coluna_destino` |
+| `cast` | Converte tipo: `number`, `integer`, `date`, `boolean`, `string`, `json` |
+| `fixed` | Adiciona campo com valor fixo a todas as linhas |
+
+Ordem de aplicação: **select → rename → cast → fixed**
+
+### POST /api/data/:table com mapeamento
+
+```json
+{
+  "rows": [{ "campo_a": "42", "campo_b": "2024-01-01" }],
+  "mapping": {
+    "rename": { "campo_a": "id", "campo_b": "data" },
+    "cast":   { "id": "integer", "data": "date" }
+  }
+}
+```
+
+Formato antigo (array direto) continua funcionando sem mudanças.
 
 ## Webhook pós-execução
 
