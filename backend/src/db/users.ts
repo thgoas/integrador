@@ -5,6 +5,7 @@ interface User {
   id: number
   username: string
   password: string
+  is_admin: number
   created_at: string
 }
 
@@ -29,11 +30,27 @@ export function updatePassword(username: string, newPassword: string) {
   getDb().prepare('UPDATE users SET password = ? WHERE username = ?').run(hashPassword(newPassword), username)
 }
 
+export function createUser(username: string, password: string, isAdmin = false): number {
+  const result = getDb()
+    .prepare('INSERT INTO users (username, password, is_admin) VALUES (?, ?, ?)')
+    .run(username, hashPassword(password), isAdmin ? 1 : 0)
+  return result.lastInsertRowid as number
+}
+
+export function listUsers(): Omit<User, 'password'>[] {
+  return getDb().prepare('SELECT id, username, is_admin, created_at FROM users ORDER BY id').all() as Omit<User, 'password'>[]
+}
+
+export function deleteUser(id: number): boolean {
+  const result = getDb().prepare('DELETE FROM users WHERE id = ?').run(id)
+  return result.changes > 0
+}
+
 export function seedAdminIfEmpty(username: string, password: string) {
   const db = getDb()
   const { count } = db.prepare('SELECT COUNT(*) as count FROM users').get() as { count: number }
   if (count === 0) {
-    db.prepare('INSERT INTO users (username, password) VALUES (?, ?)').run(username, hashPassword(password))
+    db.prepare('INSERT INTO users (username, password, is_admin) VALUES (?, ?, 1)').run(username, hashPassword(password))
     console.log(`[users] Admin "${username}" criado`)
   }
 }

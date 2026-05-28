@@ -41,10 +41,14 @@ export function runMigrations() {
     "ALTER TABLE jobs ADD COLUMN webhook_url TEXT",
     "ALTER TABLE jobs ADD COLUMN field_mapping TEXT",
     "ALTER TABLE jobs ADD COLUMN transform_script TEXT",
+    "ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0",
   ]
   for (const sql of alterations) {
     try { db.exec(sql) } catch { /* column already exists */ }
   }
+
+  // Ensure the first user (seeded admin) is marked as admin
+  db.exec("UPDATE users SET is_admin = 1 WHERE id = (SELECT MIN(id) FROM users) AND is_admin = 0")
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS api_tokens (
