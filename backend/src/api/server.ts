@@ -54,6 +54,10 @@ export async function buildServer() {
 
     try {
       await req.jwtVerify()
+      const path = req.url.split('?')[0]
+      if (path.startsWith('/api/data')) {
+        return void reply.code(403).send({ error: 'Esta rota requer um token de API. Crie um em POST /auth/tokens.' })
+      }
     } catch {
       reply.code(401).send({ error: 'Não autenticado' })
     }
