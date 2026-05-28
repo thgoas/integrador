@@ -84,7 +84,6 @@ export function JobDetail() {
           }
         </div>
         {actionError && <p style={{ color: '#ef4444', fontSize: 13, margin: '8px 0 0' }}>{actionError}</p>}
-        </div>
       </div>
 
       {latestRun && (
