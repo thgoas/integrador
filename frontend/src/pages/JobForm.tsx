@@ -23,7 +23,7 @@ const defaultForm: JobInput = {
   schedule_enabled: 0, schedule_cron: '', monthly_reprocess: 0,
   api_connection_id: 0, api_endpoint: '', api_method: 'GET', api_data_path: '',
   api_pagination_type: 'none', api_page_param: 'page', api_page_size: 100,
-  api_next_path: '', api_config: '', webhook_url: '', field_mapping: '',
+  api_next_path: '', api_config: '', webhook_url: '', field_mapping: '', transform_script: '',
 }
 
 export function JobForm() {
@@ -69,6 +69,7 @@ export function JobForm() {
         api_config: j.api_config ?? '',
         webhook_url: j.webhook_url ?? '',
         field_mapping: j.field_mapping ?? '',
+        transform_script: j.transform_script ?? '',
       }))
     }
   }, [id])
@@ -86,12 +87,14 @@ export function JobForm() {
       if (trimmedMapping) {
         try { JSON.parse(trimmedMapping) } catch { setError('Mapeamento de campos: JSON inválido'); return }
       }
+      const trimmedScript = (form.transform_script ?? '').trim()
       const data: JobInput = {
         ...form,
         concurrency: Number(form.concurrency),
         chunk_size: Number(form.chunk_size),
         api_page_size: Number(form.api_page_size),
         field_mapping: trimmedMapping || undefined,
+        transform_script: trimmedScript || undefined,
       }
       if (data.source_type === 'db') {
         data.connection_id = Number(data.connection_id)
@@ -310,32 +313,117 @@ export function JobForm() {
         {/* === MAPEAMENTO DE CAMPOS === */}
         <div style={s.card}>
           <h2 style={s.h2}>Mapeamento de Campos (opcional)</h2>
-          <p style={{ color: '#64748b', fontSize: 13, marginBottom: 12 }}>
-            Transforma os dados antes de gravar no PostgreSQL: seleciona campos, renomeia colunas, converte tipos e adiciona valores fixos.
+          <p style={{ color: '#64748b', fontSize: 13, margin: '0 0 16px' }}>
+            Transforma cada linha de dados <strong style={{ color: '#94a3b8' }}>antes</strong> de gravar no PostgreSQL.
+            As transformações são aplicadas nesta ordem: <code style={s.code}>select</code> → <code style={s.code}>rename</code> → <code style={s.code}>cast</code> → <code style={s.code}>fixed</code> → <code style={s.code}>concat</code> → <code style={s.code}>explode</code>.
           </p>
+
+          {/* Tabela de referência rápida */}
+          <div style={{ display: 'grid', gap: 10, marginBottom: 16 }}>
+            {[
+              {
+                key: 'select',
+                cor: '#3b82f6',
+                titulo: 'Selecionar campos',
+                desc: 'Lista quais campos da origem você quer manter. Campos fora da lista são descartados. Se omitir, todos os campos passam.',
+                exemplo: '"select": ["id_pedido", "valor", "data_emissao"]',
+              },
+              {
+                key: 'rename',
+                cor: '#8b5cf6',
+                titulo: 'Renomear colunas',
+                desc: 'Muda o nome de uma coluna da origem para outro nome no destino. Formato: "nome_origem": "nome_destino".',
+                exemplo: '"rename": { "id_pedido": "pedido_id", "valor_bruto": "valor" }',
+              },
+              {
+                key: 'cast',
+                cor: '#f59e0b',
+                titulo: 'Converter tipo',
+                desc: 'Converte o valor de um campo para outro tipo. Tipos disponíveis: number (decimal), integer (inteiro), date (data ISO), boolean (true/false), string (texto), json (faz parse de uma string JSON).',
+                exemplo: '"cast": { "valor": "number", "data_emissao": "date", "ativo": "boolean" }',
+              },
+              {
+                key: 'fixed',
+                cor: '#10b981',
+                titulo: 'Colunas fixas',
+                desc: 'Adiciona colunas com valor constante em todas as linhas — mesmo que não existam na origem. Útil para marcar de qual sistema ou loja veio o dado.',
+                exemplo: '"fixed": { "sistema": "ERP", "pais": "BR", "loja": "lojaB" }',
+              },
+              {
+                key: 'concat',
+                cor: '#ef4444',
+                titulo: 'Concatenar campos',
+                desc: 'Cria uma coluna nova combinando texto fixo com valores de outros campos. Use {{campo}} para referenciar o valor de um campo. Campos inexistentes viram string vazia.',
+                exemplo: '"concat": { "codigo_completo": "lojaB_{{codigo}}", "chave": "{{ano}}-{{mes}}-{{id}}" }',
+              },
+              ...(isApi ? [{
+                key: 'explode',
+                cor: '#06b6d4',
+                titulo: 'Normalizar array aninhado (só API)',
+                desc: 'Quando a API retorna objetos com um campo que é um array, "explode" cada item do array em uma linha separada — herdando os campos do objeto pai. Informe apenas o nome do campo array.',
+                exemplo: '"explode": "itens"   →   { pedido_id: 1, itens: [{sku:"A"}, {sku:"B"}] }  vira 2 linhas',
+              }] : []),
+            ].map(({ key, cor, titulo, desc, exemplo }) => (
+              <div key={key} style={{ borderLeft: `3px solid ${cor}`, paddingLeft: 12, paddingTop: 4, paddingBottom: 4 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
+                  <code style={{ ...s.code, color: cor, fontWeight: 700 }}>{key}</code>
+                  <span style={{ color: '#cbd5e1', fontSize: 13, fontWeight: 600 }}>{titulo}</span>
+                </div>
+                <p style={{ color: '#94a3b8', fontSize: 12, margin: '0 0 4px' }}>{desc}</p>
+                <code style={{ color: '#64748b', fontSize: 11, fontFamily: 'monospace', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{exemplo}</code>
+              </div>
+            ))}
+          </div>
+
           <label style={s.label}>
-            Configuração JSON
-            <span style={{ color: '#475569', fontSize: 11 }}>
-              Chaves: <code style={s.code}>select</code> · <code style={s.code}>rename</code> · <code style={s.code}>cast</code> · <code style={s.code}>fixed</code>
-            </span>
+            Configuração JSON do mapeamento
             <textarea
-              style={{ ...s.textarea, minHeight: 120, fontFamily: 'monospace', fontSize: 12 }}
+              style={{ ...s.textarea, minHeight: 130, fontFamily: 'monospace', fontSize: 12 }}
               value={form.field_mapping ?? ''}
               onChange={f('field_mapping')}
-              placeholder={`{
+              placeholder={isApi
+                ? `{
+  "select": ["pedido_id", "sku", "quantidade", "preco"],
+  "rename": { "pedido_id": "id_pedido" },
+  "cast":   { "quantidade": "integer", "preco": "number" },
+  "fixed":  { "sistema": "API", "loja": "lojaB" },
+  "concat": { "codigo_loja": "lojaB_{{sku}}" },
+  "explode": "itens"
+}`
+                : `{
   "select": ["id_pedido", "valor_bruto", "dt_emissao"],
   "rename": { "id_pedido": "pedido_id", "valor_bruto": "valor" },
   "cast":   { "valor": "number", "dt_emissao": "date" },
-  "fixed":  { "sistema": "ERP", "pais": "BR" }
+  "fixed":  { "sistema": "ERP", "pais": "BR" },
+  "concat": { "codigo_completo": "lojaB_{{codigo}}" }
 }`}
             />
           </label>
-          <p style={{ color: '#475569', fontSize: 12, marginTop: 8 }}>
-            Tipos de <code style={s.code}>cast</code>:{' '}
-            {['number', 'integer', 'date', 'boolean', 'string', 'json'].map(t =>
-              <code key={t} style={{ ...s.code, marginRight: 6 }}>{t}</code>
-            )}
-          </p>
+
+          {/* Script JS */}
+          <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid #2d3149' }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 6 }}>
+              <h3 style={{ margin: 0, fontSize: 14, color: '#e2e8f0' }}>Script de Transformação JS</h3>
+              <span style={{ fontSize: 12, color: '#64748b' }}>opcional — executado após o mapeamento JSON acima</span>
+            </div>
+            <p style={{ color: '#94a3b8', fontSize: 12, margin: '0 0 8px' }}>
+              Escreva código JavaScript livre para transformar os dados. A variável <code style={s.code}>rows</code> é um array de objetos e o script deve <strong style={{ color: '#94a3b8' }}>retornar</strong> o array transformado.
+              Permite adicionar campos calculados, filtrar linhas, combinar valores, etc.
+              Executado em ambiente isolado (sem acesso a rede, arquivos ou bibliotecas externas).
+            </p>
+            <div style={{ background: '#0f1629', border: '1px solid #2d3149', borderRadius: 6, padding: '8px 12px', marginBottom: 8 }}>
+              <p style={{ color: '#475569', fontSize: 11, margin: '0 0 4px', fontFamily: 'monospace' }}>// Exemplos:</p>
+              <p style={{ color: '#475569', fontSize: 11, margin: '0 0 4px', fontFamily: 'monospace' }}>{'return rows.map(row => ({ ...row, margem: row.preco - row.custo }))'}</p>
+              <p style={{ color: '#475569', fontSize: 11, margin: '0 0 4px', fontFamily: 'monospace' }}>{'return rows.filter(row => row.valor > 0)'}</p>
+              <p style={{ color: '#475569', fontSize: 11, margin: 0, fontFamily: 'monospace' }}>{'return rows.map(row => ({ ...row, codigo_loja: "lojaB_" + row.codigo }))'}</p>
+            </div>
+            <textarea
+              style={{ ...s.textarea, minHeight: 100, fontFamily: 'monospace', fontSize: 12 }}
+              value={form.transform_script ?? ''}
+              onChange={f('transform_script')}
+              placeholder={'return rows.map(row => ({\n  ...row,\n  margem: row.preco - row.custo,\n  codigo_loja: "lojaB_" + row.codigo\n}))'}
+            />
+          </div>
         </div>
 
         {/* === WEBHOOK === */}

@@ -34,18 +34,19 @@ export async function jobRoutes(app: FastifyInstance) {
     window_size?: string; concurrency?: number; chunk_size?: number;
     schedule_enabled?: number; schedule_cron?: string; monthly_reprocess?: number;
     field_mapping?: string;
+    transform_script?: string;
   } }>('/jobs', async (req, reply) => {
     const { name, connection_id, sql_template, destination_table, schema, loja, date_column, code_column,
       date_mode = 'fixed', date_from, date_to,
       window_size = 'month', concurrency = 4, chunk_size = 5000,
-      schedule_enabled = 0, schedule_cron, monthly_reprocess = 0, field_mapping } = req.body
+      schedule_enabled = 0, schedule_cron, monthly_reprocess = 0, field_mapping, transform_script } = req.body
     const result = db.prepare(`
       INSERT INTO jobs (name, connection_id, sql_template, destination_table, schema, loja, date_column, code_column,
-        date_mode, date_from, date_to, window_size, concurrency, chunk_size, schedule_enabled, schedule_cron, monthly_reprocess, field_mapping)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        date_mode, date_from, date_to, window_size, concurrency, chunk_size, schedule_enabled, schedule_cron, monthly_reprocess, field_mapping, transform_script)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `).run(name, connection_id, sql_template, destination_table, schema ?? null, loja ?? null, date_column ?? null, code_column ?? null,
       date_mode, date_from ?? null, date_to ?? null, window_size, concurrency, chunk_size,
-      schedule_enabled, schedule_cron ?? null, monthly_reprocess, field_mapping ?? null)
+      schedule_enabled, schedule_cron ?? null, monthly_reprocess, field_mapping ?? null, transform_script ?? null)
     reply.code(201)
     return { id: result.lastInsertRowid }
   })
@@ -54,17 +55,17 @@ export async function jobRoutes(app: FastifyInstance) {
     const existing = db.prepare('SELECT * FROM jobs WHERE id = ?').get(req.params.id) as any
     if (!existing) return reply.code(404).send({ error: 'Not found' })
     const fields = ['name','connection_id','sql_template','destination_table','schema','loja','date_column','code_column',
-      'date_mode','date_from','date_to','window_size','concurrency','chunk_size','schedule_enabled','schedule_cron','monthly_reprocess','field_mapping']
+      'date_mode','date_from','date_to','window_size','concurrency','chunk_size','schedule_enabled','schedule_cron','monthly_reprocess','field_mapping','transform_script']
     const merged = { ...existing, ...Object.fromEntries(fields.filter(f => req.body[f] !== undefined).map(f => [f, req.body[f]])) }
     db.prepare(`
       UPDATE jobs SET name=?,connection_id=?,sql_template=?,destination_table=?,schema=?,loja=?,date_column=?,code_column=?,
         date_mode=?,date_from=?,date_to=?,window_size=?,concurrency=?,chunk_size=?,schedule_enabled=?,
-        schedule_cron=?,monthly_reprocess=?,field_mapping=?,updated_at=CURRENT_TIMESTAMP WHERE id=?
+        schedule_cron=?,monthly_reprocess=?,field_mapping=?,transform_script=?,updated_at=CURRENT_TIMESTAMP WHERE id=?
     `).run(merged.name, merged.connection_id, merged.sql_template, merged.destination_table,
       merged.schema, merged.loja, merged.date_column, merged.code_column,
       merged.date_mode, merged.date_from, merged.date_to, merged.window_size,
       merged.concurrency, merged.chunk_size, merged.schedule_enabled, merged.schedule_cron,
-      merged.monthly_reprocess, merged.field_mapping ?? null, req.params.id)
+      merged.monthly_reprocess, merged.field_mapping ?? null, merged.transform_script ?? null, req.params.id)
     return { ok: true }
   })
 

@@ -72,6 +72,7 @@ export interface Job {
   api_config: string | null
   webhook_url: string | null
   field_mapping: string | null
+  transform_script: string | null
   last_run_id: number | null
   last_run_status: string | null
   last_run_at: string | null
@@ -109,6 +110,7 @@ export interface JobInput {
   api_config?: string
   webhook_url?: string
   field_mapping?: string
+  transform_script?: string
 }
 
 export interface Run {

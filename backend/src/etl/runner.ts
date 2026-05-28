@@ -6,7 +6,7 @@ import { renderTemplate } from './template.js'
 import { extractChunked } from './extractor.js'
 import { extractApiChunked } from './api-extractor.js'
 import { ensureTable, syncColumns, deletePeriod, copyChunkToTable, upsertChunkToTable } from './loader.js'
-import { applyMapping } from './transform.js'
+import { applyMapping, runTransformScript } from './transform.js'
 import { broadcastLog } from '../api/sse.js'
 
 function resolveDates(job: any): { date_from: string; date_to: string } {
@@ -163,6 +163,15 @@ async function runPipeline(job: any, runId: number, signal: AbortSignal) {
             if (chunk.length === 0) continue
 
             if (mappingConfig) chunk = applyMapping(chunk, mappingConfig)
+
+            if (job.transform_script) {
+              try {
+                chunk = runTransformScript(chunk, job.transform_script)
+              } catch (err: any) {
+                log(runId, 'error', `Erro no script de transformação: ${err.message}`)
+                throw err
+              }
+            }
 
             // First chunk: create/verify table then delete the period
             if (!tableReady) {
