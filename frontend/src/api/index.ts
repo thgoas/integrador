@@ -5,10 +5,11 @@ import type {
   Job, JobInput,
   Run, RunLog,
   ApiToken,
+  User,
 } from './types'
 
-export { getToken, setToken, clearToken } from './http'
-export type { Connection, ConnectionInput, ApiConnection, ApiConnectionInput, Job, JobInput, Run, RunLog, ApiToken } from './types'
+export { getToken, setToken, clearToken, getIsAdmin } from './http'
+export type { Connection, ConnectionInput, ApiConnection, ApiConnectionInput, Job, JobInput, Run, RunLog, ApiToken, User } from './types'
 
 export const api = {
   auth: {
@@ -89,6 +90,16 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({}),
       }),
+  },
+
+  users: {
+    list: () => request<User[]>('/auth/users'),
+    create: (username: string, password: string, is_admin: boolean) =>
+      request<{ id: number; username: string; is_admin: number }>('/auth/users', {
+        method: 'POST',
+        body: JSON.stringify({ username, password, is_admin }),
+      }),
+    remove: (id: number) => request<{ ok: boolean }>(`/auth/users/${id}`, { method: 'DELETE' }),
   },
 
   tokens: {

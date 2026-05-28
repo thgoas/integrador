@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom'
-import { getToken, clearToken, api } from './api'
+import { getToken, clearToken, getIsAdmin, api } from './api'
 import { Login } from './pages/Login'
 import { Dashboard } from './pages/Dashboard'
 import { Jobs } from './pages/Jobs'
@@ -9,6 +9,7 @@ import { JobDetail } from './pages/JobDetail'
 import { Connections } from './pages/Connections'
 import { ApiConnections } from './pages/ApiConnections'
 import { ApiTokens } from './pages/ApiTokens'
+import { Users } from './pages/Users'
 
 const navStyle = (active: boolean): React.CSSProperties => ({
   display: 'block', padding: '8px 16px', borderRadius: 6, textDecoration: 'none',
@@ -79,6 +80,7 @@ function ChangePasswordModal({ onClose }: { onClose: () => void }) {
 
 function AppShell({ onLogout }: { onLogout: () => void }) {
   const [changePwd, setChangePwd] = useState(false)
+  const isAdmin = getIsAdmin()
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh' }}>
@@ -92,6 +94,7 @@ function AppShell({ onLogout }: { onLogout: () => void }) {
           <NavLink to="/connections" style={({ isActive }) => navStyle(isActive)}>Conexões DB</NavLink>
           <NavLink to="/api-connections" style={({ isActive }) => navStyle(isActive)}>Conexões API</NavLink>
           <NavLink to="/tokens" style={({ isActive }) => navStyle(isActive)}>Tokens de API</NavLink>
+          {isAdmin && <NavLink to="/users" style={({ isActive }) => navStyle(isActive)}>Usuários</NavLink>}
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <button style={btnNav} onClick={() => setChangePwd(true)}>Trocar senha</button>
@@ -110,6 +113,7 @@ function AppShell({ onLogout }: { onLogout: () => void }) {
           <Route path="/connections" element={<Connections />} />
           <Route path="/api-connections" element={<ApiConnections />} />
           <Route path="/tokens" element={<ApiTokens />} />
+          <Route path="/users" element={<Users />} />
         </Routes>
       </main>
     </div>

@@ -12,6 +12,17 @@ export function clearToken(): void {
   localStorage.removeItem('token')
 }
 
+export function getIsAdmin(): boolean {
+  const token = getToken()
+  if (!token) return false
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]))
+    return Boolean(payload.is_admin)
+  } catch {
+    return false
+  }
+}
+
 export async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const token = getToken()
   const hasBody = options?.body !== undefined
