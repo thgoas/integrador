@@ -13,7 +13,7 @@ import { apiConnectionRoutes } from './routes/api-connections.js'
 import { tokenRoutes } from './routes/tokens.js'
 
 export async function buildServer() {
-  const app = Fastify({ logger: { transport: { target: 'pino-pretty' } } })
+  const app = Fastify({ logger: true })
 
   await app.register(cors, { origin: true })
   await app.register(jwt, { secret: env.JWT_SECRET })

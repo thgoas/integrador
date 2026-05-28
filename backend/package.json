@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "node --experimental-sqlite --env-file=.env --import tsx/esm --watch src/index.ts",
+    "dev": "concurrently -k -n tsc,node -c cyan,green \"tsc --watch --preserveWatchOutput\" \"node --experimental-sqlite --env-file=.env --watch dist/index.js\"",
     "build": "tsc && cp src/db/schema.sql dist/db/schema.sql",
     "start": "node --experimental-sqlite --env-file=.env dist/index.js"
   },
@@ -29,6 +29,7 @@
     "@types/node": "^22.0.0",
     "@types/pg": "^8.11.6",
     "@types/pg-copy-streams": "^1.2.5",
+    "concurrently": "^10.0.0",
     "tsx": "^4.16.2",
     "typescript": "^5.5.4"
   }
