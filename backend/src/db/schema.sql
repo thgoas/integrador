@@ -59,5 +59,16 @@ CREATE TABLE IF NOT EXISTS users (
   created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS api_connections (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  name        TEXT NOT NULL,
+  base_url    TEXT NOT NULL,
+  auth_type   TEXT NOT NULL DEFAULT 'none',
+  auth_header TEXT,
+  auth_value  TEXT,
+  headers     TEXT,
+  created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE INDEX IF NOT EXISTS idx_runs_job_id ON runs(job_id);
 CREATE INDEX IF NOT EXISTS idx_run_logs_run_id ON run_logs(run_id);
