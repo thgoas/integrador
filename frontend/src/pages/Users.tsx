@@ -65,7 +65,7 @@ export function Users() {
   }
 
   const remove = async (user: User) => {
-    if (!confirm(`Remover o usuário "${user.username}"? Esta ação não pode ser desfeita.`)) return
+    if (!window.confirm(`Remover o usuário "${user.username}"? Esta ação não pode ser desfeita.`)) return
     try {
       await api.users.remove(user.id)
       await load()
