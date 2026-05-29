@@ -67,10 +67,25 @@ export function ApiTokens() {
 
   const copy = () => {
     if (!newToken) return
-    navigator.clipboard.writeText(newToken).then(() => {
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(newToken).then(() => {
+        setCopied(true)
+        setTimeout(() => setCopied(false), 2000)
+      })
+    } else {
+      // Fallback para HTTP (sem contexto seguro)
+      const ta = document.createElement('textarea')
+      ta.value = newToken
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.focus()
+      ta.select()
+      document.execCommand('copy')
+      document.body.removeChild(ta)
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
-    })
+    }
   }
 
   return (
