@@ -112,12 +112,17 @@ export const api = {
   },
 
   data: {
-    query: (table: string, params: { limit?: number; offset?: number; order_by?: string; order_dir?: string } = {}) => {
+    query: (table: string, params: {
+      limit?: number; offset?: number;
+      order_by?: string; order_dir?: string;
+      group_by?: string; sum?: string; avg?: string;
+      count?: string; min?: string; max?: string;
+      [key: string]: string | number | undefined;
+    } = {}) => {
       const qs = new URLSearchParams()
-      if (params.limit !== undefined) qs.set('limit', String(params.limit))
-      if (params.offset !== undefined) qs.set('offset', String(params.offset))
-      if (params.order_by) qs.set('order_by', params.order_by)
-      if (params.order_dir) qs.set('order_dir', params.order_dir)
+      for (const [k, v] of Object.entries(params)) {
+        if (v !== undefined && v !== '') qs.set(k, String(v))
+      }
       const q = qs.toString()
       return request<{ data: Record<string, any>[]; total: number; limit: number; offset: number }>(
         `/data/${encodeURIComponent(table)}${q ? `?${q}` : ''}`

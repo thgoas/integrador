@@ -3,7 +3,7 @@ import { destPool } from '../../config/destination.js'
 import { applyMapping } from '../../etl/transform.js'
 import type { MappingConfig } from '../../etl/transform.js'
 
-const RESERVED = new Set(['limit', 'offset', 'order_by', 'order_dir'])
+const RESERVED = new Set(['limit', 'offset', 'order_by', 'order_dir', 'group_by', 'sum', 'avg', 'count', 'min', 'max'])
 
 const OPERATORS: Record<string, (col: string, idx: number) => string> = {
   gt:   (c, i) => `"${c}" > $${i}`,
@@ -13,6 +13,49 @@ const OPERATORS: Record<string, (col: string, idx: number) => string> = {
   like: (c, i) => `"${c}" ILIKE $${i}`,
   in:   (c, i) => `"${c}" = ANY($${i})`,
   null: (c)    => `"${c}" IS NULL`,
+}
+
+type AggregationResult = {
+  groupCols: string[]
+  selectAggs: string[]
+  hasAgg: boolean
+}
+
+function parseAggregation(query: Record<string, string>): AggregationResult {
+  const sanitize = (s: string) => s.replace(/[^a-zA-Z0-9_]/g, '')
+
+  const groupCols = (query.group_by ?? '')
+    .split(',')
+    .map(c => sanitize(c.trim()))
+    .filter(Boolean)
+
+  const selectAggs: string[] = []
+
+  const addAggs = (fn: string, param: string) => {
+    for (const raw of (query[param] ?? '').split(',')) {
+      const col = sanitize(raw.trim())
+      if (!col) continue
+      selectAggs.push(`${fn}("${col}") AS ${fn.toLowerCase()}_${col}`)
+    }
+  }
+
+  if (query.count !== undefined) {
+    const raw = query.count.trim()
+    if (raw === '*') {
+      selectAggs.push('COUNT(*) AS count')
+    } else {
+      const col = sanitize(raw)
+      if (col) selectAggs.push(`COUNT("${col}") AS count_${col}`)
+    }
+  }
+
+  addAggs('SUM', 'sum')
+  addAggs('AVG', 'avg')
+  addAggs('MIN', 'min')
+  addAggs('MAX', 'max')
+
+  const hasAgg = groupCols.length > 0 || selectAggs.length > 0
+  return { groupCols, selectAggs, hasAgg }
 }
 
 function parseFilters(query: Record<string, string>) {
@@ -110,6 +153,7 @@ export async function dataRoutes(app: FastifyInstance) {
     const orderClause = orderBy ? ` ORDER BY "${orderBy}" ${orderDir}` : ''
 
     const { conditions, values } = parseFilters(req.query)
+    const { groupCols, selectAggs, hasAgg } = parseAggregation(req.query)
     const whereClause = conditions.length ? ` WHERE ${conditions.join(' AND ')}` : ''
     const filterValues = values
 
@@ -117,15 +161,27 @@ export async function dataRoutes(app: FastifyInstance) {
       const dataIdx = filterValues.length + 1
       const offsetIdx = filterValues.length + 2
 
+      let dataQuery: string
+      let countQuery: string
+
+      if (hasAgg) {
+        const selectCols = [
+          ...groupCols.map(c => `"${c}"`),
+          ...selectAggs,
+        ].join(', ') || '1'
+        const groupByClause = groupCols.length ? ` GROUP BY ${groupCols.map(c => `"${c}"`).join(', ')}` : ''
+        // ORDER BY can reference aliases — use unquoted sanitized name
+        const aggOrderClause = orderBy ? ` ORDER BY ${orderBy} ${orderDir}` : ''
+        dataQuery = `SELECT ${selectCols} FROM "${table}"${whereClause}${groupByClause}${aggOrderClause} LIMIT $${dataIdx} OFFSET $${offsetIdx}`
+        countQuery = `SELECT COUNT(*) AS total FROM (SELECT 1 FROM "${table}"${whereClause}${groupByClause}) __agg`
+      } else {
+        dataQuery = `SELECT * FROM "${table}"${whereClause}${orderClause} LIMIT $${dataIdx} OFFSET $${offsetIdx}`
+        countQuery = `SELECT COUNT(*) AS total FROM "${table}"${whereClause}`
+      }
+
       const [rows, count] = await Promise.all([
-        destPool.query(
-          `SELECT * FROM "${table}"${whereClause}${orderClause} LIMIT $${dataIdx} OFFSET $${offsetIdx}`,
-          [...filterValues, limit, offset]
-        ),
-        destPool.query(
-          `SELECT COUNT(*) AS total FROM "${table}"${whereClause}`,
-          filterValues
-        ),
+        destPool.query(dataQuery, [...filterValues, limit, offset]),
+        destPool.query(countQuery, filterValues),
       ])
       return { data: rows.rows, total: Number(count.rows[0].total), limit, offset }
     } catch (err: any) {
