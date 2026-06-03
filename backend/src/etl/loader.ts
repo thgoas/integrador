@@ -3,7 +3,9 @@ import { destPool } from '../config/destination.js'
 
 function formatCsvValue(val: any): string {
   if (val === null || val === undefined) return '\\N'
-  const str = val instanceof Date ? val.toISOString() : String(val)
+  const str = val instanceof Date
+    ? val.toISOString().slice(0, 10)  // YYYY-MM-DD — sem componente de hora
+    : String(val)
   if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
     return '"' + str.replace(/"/g, '""') + '"'
   }
@@ -14,10 +16,10 @@ function inferType(val: any): string {
   if (val === null || val === undefined) return 'TEXT'
   if (typeof val === 'number') return Number.isInteger(val) ? 'BIGINT' : 'NUMERIC'
   if (typeof val === 'boolean') return 'BOOLEAN'
-  if (val instanceof Date) return 'TIMESTAMPTZ'
+  if (val instanceof Date) return 'DATE'
   const str = String(val)
   if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return 'DATE'
-  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(str)) return 'TIMESTAMPTZ'
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(str)) return 'DATE'
   if (/^-?\d+(\.\d+)?$/.test(str) && str.length < 20) return 'NUMERIC'
   return 'TEXT'
 }
