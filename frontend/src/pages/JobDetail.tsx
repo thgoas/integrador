@@ -17,6 +17,8 @@ export function JobDetail() {
   const [repError, setRepError] = useState('')
   const [repLoading, setRepLoading] = useState(false)
   const [actionError, setActionError] = useState('')
+  const [runsPage, setRunsPage] = useState(0)
+  const RUNS_PER_PAGE = 10
 
   const load = async () => {
     const [j, r] = await Promise.all([api.jobs.get(Number(id)), api.runs.listByJob(Number(id))])
@@ -135,7 +137,14 @@ export function JobDetail() {
       )}
 
       <div style={s.card}>
-        <h2 style={s.h2}>Histórico de runs</h2>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <h2 style={{ ...s.h2, marginBottom: 0 }}>Histórico de runs</h2>
+          {runs.length > RUNS_PER_PAGE && (
+            <span style={{ fontSize: 12, color: '#64748b' }}>
+              {runsPage * RUNS_PER_PAGE + 1}–{Math.min((runsPage + 1) * RUNS_PER_PAGE, runs.length)} de {runs.length}
+            </span>
+          )}
+        </div>
         {runs.length === 0 && <p style={{ color: '#64748b' }}>Nenhum run executado.</p>}
         <table style={s.table}>
           <thead><tr>
@@ -143,7 +152,7 @@ export function JobDetail() {
             <th style={s.th}>Gravadas</th><th style={s.th}>Início</th><th style={s.th}>Duração</th><th style={s.th}>Ações</th>
           </tr></thead>
           <tbody>
-            {runs.map(run => {
+            {runs.slice(runsPage * RUNS_PER_PAGE, (runsPage + 1) * RUNS_PER_PAGE).map(run => {
               const dur = run.finished_at
                 ? Math.round((new Date(run.finished_at).getTime() - new Date(run.started_at).getTime()) / 1000)
                 : null
@@ -163,6 +172,12 @@ export function JobDetail() {
             })}
           </tbody>
         </table>
+        {runs.length > RUNS_PER_PAGE && (
+          <div style={{ display: 'flex', gap: 8, marginTop: 12, justifyContent: 'flex-end' }}>
+            <button style={s.btnSm} disabled={runsPage === 0} onClick={() => setRunsPage(p => p - 1)}>← Anterior</button>
+            <button style={s.btnSm} disabled={(runsPage + 1) * RUNS_PER_PAGE >= runs.length} onClick={() => setRunsPage(p => p + 1)}>Próximo →</button>
+          </div>
+        )}
       </div>
 
       {reprocessModal && (
