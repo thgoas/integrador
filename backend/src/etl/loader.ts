@@ -12,6 +12,34 @@ function formatCsvValue(val: any): string {
   return str
 }
 
+/** Whitelist de tipos "amigáveis" → SQL. Valor fora da lista é ignorado (cai na inferência). */
+const PG_TYPE_MAP: Record<string, string> = {
+  text: 'TEXT',
+  string: 'TEXT',
+  bigint: 'BIGINT',
+  integer: 'BIGINT',
+  int: 'BIGINT',
+  numeric: 'NUMERIC',
+  number: 'NUMERIC',
+  decimal: 'NUMERIC',
+  float: 'DOUBLE PRECISION',
+  boolean: 'BOOLEAN',
+  bool: 'BOOLEAN',
+  date: 'DATE',
+  timestamp: 'TIMESTAMPTZ',
+  timestamptz: 'TIMESTAMPTZ',
+}
+
+/** Resolve o tipo SQL de uma coluna: usa o override (se reconhecido) ou infere do valor. */
+function resolveColumnSqlType(col: string, sampleVal: any, typeOverrides?: Record<string, string>): string {
+  const override = typeOverrides?.[col]
+  if (override) {
+    const sql = PG_TYPE_MAP[override.toLowerCase()]
+    if (sql) return sql
+  }
+  return inferType(sampleVal)
+}
+
 function inferType(val: any): string {
   if (val === null || val === undefined) return 'TEXT'
   if (typeof val === 'number') return Number.isInteger(val) ? 'BIGINT' : 'NUMERIC'
@@ -51,9 +79,10 @@ export async function ensureTable(
   destinationTable: string,
   columns: string[],
   sampleRow: Record<string, any>,
-  codeColumn?: string | null
+  codeColumn?: string | null,
+  typeOverrides?: Record<string, string>
 ): Promise<void> {
-  const typedColDefs = columns.map(c => `"${c}" ${inferType(sampleRow[c])}`).join(', ')
+  const typedColDefs = columns.map(c => `"${c}" ${resolveColumnSqlType(c, sampleRow[c], typeOverrides)}`).join(', ')
   await destPool.query(`CREATE TABLE IF NOT EXISTS "${destinationTable}" (${typedColDefs})`)
 
   if (codeColumn) {
@@ -67,7 +96,8 @@ export async function ensureTable(
 export async function syncColumns(
   destinationTable: string,
   columns: string[],
-  sampleRow: Record<string, any>
+  sampleRow: Record<string, any>,
+  typeOverrides?: Record<string, string>
 ): Promise<void> {
   const existing = await destPool.query<{ column_name: string }>(
     `SELECT column_name FROM information_schema.columns WHERE table_name = $1`,
@@ -77,10 +107,64 @@ export async function syncColumns(
   for (const col of columns) {
     if (!existingCols.has(col)) {
       await destPool.query(
-        `ALTER TABLE "${destinationTable}" ADD COLUMN IF NOT EXISTS "${col}" ${inferType(sampleRow[col])}`
+        `ALTER TABLE "${destinationTable}" ADD COLUMN IF NOT EXISTS "${col}" ${resolveColumnSqlType(col, sampleRow[col], typeOverrides)}`
       )
     }
   }
+}
+
+/** Mapeia data_type do information_schema para o "grupo" SQL comparável. */
+function normalizeExistingType(dataType: string): string {
+  const t = dataType.toLowerCase()
+  if (t === 'text' || t === 'character varying' || t === 'character' || t === 'varchar') return 'TEXT'
+  if (t === 'bigint' || t === 'integer' || t === 'smallint') return 'BIGINT'
+  if (t === 'numeric' || t === 'decimal') return 'NUMERIC'
+  if (t === 'double precision' || t === 'real') return 'DOUBLE PRECISION'
+  if (t === 'boolean') return 'BOOLEAN'
+  if (t === 'date') return 'DATE'
+  if (t.startsWith('timestamp')) return 'TIMESTAMPTZ'
+  return dataType.toUpperCase()
+}
+
+export interface AlterTypeResult {
+  changed: { column: string; from: string; to: string }[]
+  failed: { column: string; to: string; error: string }[]
+}
+
+/**
+ * Altera o tipo de colunas JÁ existentes para casar com os overrides do usuário.
+ * Best-effort: cada coluna em try/catch; NUMERIC→TEXT é seguro, TEXT→NUMERIC pode falhar.
+ */
+export async function alterColumnTypes(
+  destinationTable: string,
+  typeOverrides: Record<string, string>
+): Promise<AlterTypeResult> {
+  const result: AlterTypeResult = { changed: [], failed: [] }
+  const entries = Object.entries(typeOverrides)
+  if (entries.length === 0) return result
+
+  const existing = await destPool.query<{ column_name: string; data_type: string }>(
+    `SELECT column_name, data_type FROM information_schema.columns WHERE table_name = $1`,
+    [destinationTable]
+  )
+  const existingTypes = new Map(existing.rows.map(r => [r.column_name, r.data_type]))
+
+  for (const [col, friendly] of entries) {
+    const targetSql = PG_TYPE_MAP[friendly.toLowerCase()]
+    if (!targetSql) continue
+    const current = existingTypes.get(col)
+    if (current === undefined) continue // coluna ainda não existe; será criada com o tipo certo
+    if (normalizeExistingType(current) === targetSql) continue // já está no tipo desejado
+    try {
+      await destPool.query(
+        `ALTER TABLE "${destinationTable}" ALTER COLUMN "${col}" TYPE ${targetSql} USING "${col}"::${targetSql}`
+      )
+      result.changed.push({ column: col, from: current, to: targetSql })
+    } catch (err: any) {
+      result.failed.push({ column: col, to: targetSql, error: err.message })
+    }
+  }
+  return result
 }
 
 export async function deletePeriod(

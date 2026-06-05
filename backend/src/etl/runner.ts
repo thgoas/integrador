@@ -5,8 +5,8 @@ import { generatePeriods } from './periods.js'
 import { renderTemplate } from './template.js'
 import { extractChunked } from './extractor.js'
 import { extractApiChunked } from './api-extractor.js'
-import { ensureTable, syncColumns, deletePeriod, copyChunkToTable, upsertChunkToTable } from './loader.js'
-import { applyMapping, runTransformScript } from './transform.js'
+import { ensureTable, syncColumns, deletePeriod, copyChunkToTable, upsertChunkToTable, alterColumnTypes } from './loader.js'
+import { applyMapping, runTransformScript, resolveColumnTypes } from './transform.js'
 import { broadcastLog } from '../api/sse.js'
 
 function resolveDates(job: any): { date_from: string; date_to: string } {
@@ -178,11 +178,19 @@ async function runPipeline(job: any, runId: number, signal: AbortSignal) {
               if (!tableSetupPromise) {
                 columns = Object.keys(chunk[0])
                 const sampleRow = chunk[0]
+                const typeOverrides = mappingConfig ? resolveColumnTypes(mappingConfig) : {}
                 tableSetupPromise = (async () => {
                   try {
                     log(runId, 'info', `Criando/verificando tabela destino: "${job.destination_table}"`)
-                    await ensureTable(job.destination_table, columns, sampleRow, job.code_column)
-                    await syncColumns(job.destination_table, columns, sampleRow)
+                    await ensureTable(job.destination_table, columns, sampleRow, job.code_column, typeOverrides)
+                    await syncColumns(job.destination_table, columns, sampleRow, typeOverrides)
+                    const altered = await alterColumnTypes(job.destination_table, typeOverrides)
+                    for (const c of altered.changed) {
+                      log(runId, 'info', `Tipo da coluna "${c.column}" alterado: ${c.from} → ${c.to}`)
+                    }
+                    for (const c of altered.failed) {
+                      log(runId, 'warn', `Não foi possível alterar tipo da coluna "${c.column}" para ${c.to}: ${c.error}`)
+                    }
                     log(runId, 'info', `Tabela OK. Colunas: ${columns.join(', ')}`)
                     tableReady = true
                   } catch (err: any) {

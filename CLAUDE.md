@@ -256,9 +256,39 @@ Transforma os dados antes de gravar no PostgreSQL destino. Aplicado em cada chun
 | `select` | Whitelist de campos da origem; omitir = todos |
 | `rename` | `campo_origem → coluna_destino` |
 | `cast` | Converte tipo: `number`, `integer`, `date`, `boolean`, `string`, `json` |
+| `types` | Define o tipo da **coluna** no destino (DDL), não transforma o valor |
 | `fixed` | Adiciona campo com valor fixo a todas as linhas |
 
-Ordem de aplicação: **select → rename → cast → fixed**
+Ordem de aplicação: **select → rename → cast → fixed → concat → explode**
+
+### Tipo da coluna no destino (`types`)
+
+Por padrão a tabela destino é auto-criada com tipos inferidos do primeiro chunk —
+qualquer valor numérico vira `NUMERIC`/`BIGINT`. Para forçar o tipo (ex: códigos
+como EAN, CNPJ, IDs com zero à esquerda que devem ser **texto**), use `types`:
+
+```json
+{ "types": { "codigo": "text", "ean": "text" } }
+```
+
+| Tipo amigável | Coluna PostgreSQL |
+|---|---|
+| `text` / `string` | `TEXT` |
+| `bigint` / `integer` / `int` | `BIGINT` |
+| `numeric` / `number` / `decimal` | `NUMERIC` |
+| `float` | `DOUBLE PRECISION` |
+| `boolean` / `bool` | `BOOLEAN` |
+| `date` | `DATE` |
+| `timestamp` / `timestamptz` | `TIMESTAMPTZ` |
+
+- O `cast` também influencia o tipo da coluna: `cast: "string"` agora gera coluna
+  `TEXT` (antes o valor virava string mas a coluna ainda nascia `NUMERIC`). `types`
+  tem prioridade sobre o derivado do `cast`.
+- Chaves usam o nome de **destino** da coluna (pós-`rename`), igual a `cast`/`fixed`.
+- Em tabela/coluna **já existente** com tipo divergente, roda
+  `ALTER COLUMN ... TYPE ... USING ...` (best-effort): `NUMERIC → TEXT` é seguro;
+  conversões inválidas (ex: `TEXT → NUMERIC` com dados não-numéricos) falham e só
+  geram aviso nos logs do run, sem interromper o fluxo.
 
 ### POST /api/data/:table com mapeamento
 

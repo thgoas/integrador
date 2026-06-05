@@ -4,6 +4,8 @@ export interface MappingConfig {
   select?: string[]
   rename?: Record<string, string>
   cast?: Record<string, 'number' | 'integer' | 'date' | 'boolean' | 'string' | 'json'>
+  /** Tipo da coluna no destino (DDL). Sobrescreve a inferência automática. */
+  types?: Record<string, string>
   fixed?: Record<string, unknown>
   /** Cria colunas combinando texto fixo com valores de campos via {{campo}} */
   concat?: Record<string, string>
@@ -41,6 +43,33 @@ function castValue(value: unknown, type: NonNullable<MappingConfig['cast']>[stri
   } catch {
     return null
   }
+}
+
+/** Mapeia o tipo de `cast` para o tipo de coluna desejado no destino (DDL). */
+const CAST_TO_COLUMN_TYPE: Record<string, string> = {
+  string: 'text',
+  integer: 'bigint',
+  number: 'numeric',
+  date: 'date',
+  boolean: 'boolean',
+}
+
+/**
+ * Resolve o tipo de coluna desejado no destino por coluna, combinando:
+ *  - tipo derivado do `cast` (ex: cast "string" → coluna TEXT)
+ *  - override explícito via `types` (tem prioridade)
+ * Chaves usam o nome de destino da coluna (pós-rename), igual a `cast`/`fixed`.
+ */
+export function resolveColumnTypes(config: MappingConfig): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [col, castType] of Object.entries(config.cast ?? {})) {
+    const mapped = CAST_TO_COLUMN_TYPE[castType]
+    if (mapped) out[col] = mapped
+  }
+  for (const [col, type] of Object.entries(config.types ?? {})) {
+    out[col] = type
+  }
+  return out
 }
 
 /** Substitui {{campo}} pelo valor do campo na row. Campos inexistentes viram string vazia. */

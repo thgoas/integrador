@@ -316,6 +316,7 @@ export function JobForm() {
           <p style={{ color: '#64748b', fontSize: 13, margin: '0 0 16px' }}>
             Transforma cada linha de dados <strong style={{ color: '#94a3b8' }}>antes</strong> de gravar no PostgreSQL.
             As transformações são aplicadas nesta ordem: <code style={s.code}>select</code> → <code style={s.code}>rename</code> → <code style={s.code}>cast</code> → <code style={s.code}>fixed</code> → <code style={s.code}>concat</code> → <code style={s.code}>explode</code>.
+            Já <code style={s.code}>types</code> define o tipo da coluna no destino (não transforma valor).
           </p>
 
           {/* Tabela de referência rápida */}
@@ -341,6 +342,13 @@ export function JobForm() {
                 titulo: 'Converter tipo',
                 desc: 'Converte o valor de um campo para outro tipo. Tipos disponíveis: number (decimal), integer (inteiro), date (data ISO), boolean (true/false), string (texto), json (faz parse de uma string JSON).',
                 exemplo: '"cast": { "valor": "number", "data_emissao": "date", "ativo": "boolean" }',
+              },
+              {
+                key: 'types',
+                cor: '#ec4899',
+                titulo: 'Tipo da coluna no destino',
+                desc: 'Força o tipo da coluna criada no PostgreSQL, sobrescrevendo a inferência automática. Use text para códigos numéricos (EAN, CNPJ, IDs com zero à esquerda) que não devem virar número. Tipos: text, bigint, numeric, float, boolean, date, timestamptz. Em tabela já existente, tenta alterar o tipo da coluna (ALTER COLUMN).',
+                exemplo: '"types": { "codigo": "text", "ean": "text", "cnpj": "text" }',
               },
               {
                 key: 'fixed',
@@ -386,6 +394,7 @@ export function JobForm() {
   "select": ["pedido_id", "sku", "quantidade", "preco"],
   "rename": { "pedido_id": "id_pedido" },
   "cast":   { "quantidade": "integer", "preco": "number" },
+  "types":  { "sku": "text" },
   "fixed":  { "sistema": "API", "loja": "lojaB" },
   "concat": { "codigo_loja": "lojaB_{{sku}}" },
   "explode": "itens"
@@ -394,6 +403,7 @@ export function JobForm() {
   "select": ["id_pedido", "valor_bruto", "dt_emissao"],
   "rename": { "id_pedido": "pedido_id", "valor_bruto": "valor" },
   "cast":   { "valor": "number", "dt_emissao": "date" },
+  "types":  { "codigo": "text" },
   "fixed":  { "sistema": "ERP", "pais": "BR" },
   "concat": { "codigo_completo": "lojaB_{{codigo}}" }
 }`}
