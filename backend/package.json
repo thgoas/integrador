@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "concurrently -k -n tsc,node -c cyan,green \"tsc --watch --preserveWatchOutput\" \"node --experimental-sqlite --env-file=.env --watch dist/index.js\"",
     "build": "tsc && cp src/db/schema.sql dist/db/schema.sql",
-    "start": "node --experimental-sqlite --env-file=.env dist/index.js"
+    "start": "node --experimental-sqlite --env-file=.env dist/index.js",
+    "indexes": "node --env-file=.env dist/scripts/create-indexes.js"
   },
   "dependencies": {
     "@fastify/cors": "^9.0.1",

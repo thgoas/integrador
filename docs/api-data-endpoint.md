@@ -50,6 +50,8 @@ Quando `group_by` ou qualquer função de agregação está presente, o endpoint
 | `avg=col` | `AVG("col")` | `avg_col` | `?avg=preco` |
 | `count=*` | `COUNT(*)` | `count` | `?count=*` |
 | `count=col` | `COUNT("col")` | `count_col` | `?count=id` |
+| `count_distinct=col` | `COUNT(DISTINCT "col")` | `count_distinct_col` | `?count_distinct=venda` |
+| `count_distinct=c1,c2` | `COUNT(DISTINCT "c1"), COUNT(DISTINCT "c2")` | `count_distinct_c1`, `count_distinct_c2` | `?count_distinct=venda,cliente` |
 | `min=col` | `MIN("col")` | `min_col` | `?min=data` |
 | `max=col` | `MAX("col")` | `max_col` | `?max=data` |
 

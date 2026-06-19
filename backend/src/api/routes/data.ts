@@ -3,7 +3,7 @@ import { destPool } from '../../config/destination.js'
 import { applyMapping } from '../../etl/transform.js'
 import type { MappingConfig } from '../../etl/transform.js'
 
-const RESERVED = new Set(['limit', 'offset', 'order_by', 'order_dir', 'group_by', 'sum', 'avg', 'count', 'min', 'max'])
+const RESERVED = new Set(['limit', 'offset', 'order_by', 'order_dir', 'group_by', 'sum', 'avg', 'count', 'count_distinct', 'min', 'max'])
 
 const OPERATORS: Record<string, (col: string, idx: number) => string> = {
   gt:   (c, i) => `"${c}" > $${i}`,
@@ -47,6 +47,11 @@ function parseAggregation(query: Record<string, string>): AggregationResult {
       const col = sanitize(raw)
       if (col) selectAggs.push(`COUNT("${col}") AS count_${col}`)
     }
+  }
+
+  for (const raw of (query.count_distinct ?? '').split(',')) {
+    const col = sanitize(raw.trim())
+    if (col) selectAggs.push(`COUNT(DISTINCT "${col}") AS count_distinct_${col}`)
   }
 
   addAggs('SUM', 'sum')

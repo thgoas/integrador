@@ -17,6 +17,18 @@ Login padrão: `admin` / `admin123`
 
 > **Node 25+**: `tsx/esm` tem incompatibilidade com `pino-pretty` no Node 25. Use `npm run build && node --experimental-sqlite --env-file=.env dist/index.js` para rodar o backend compilado.
 
+### Índices no PostgreSQL de destino
+
+Para acelerar as consultas agregadas por (data, loja/empresa) — backfill do Painel:
+
+```bash
+cd backend && npm run build && npm run indexes
+```
+
+Cria `CREATE INDEX CONCURRENTLY IF NOT EXISTS` em `vendas (dtvenda, empresa, loja)`,
+`estoques (data, loja)` e `cadastros (data_venda, empresa, loja)`. Idempotente; pula
+tabelas/colunas inexistentes. Fonte: [`src/scripts/create-indexes.ts`](backend/src/scripts/create-indexes.ts).
+
 ## Stack
 
 | Camada | Tecnologia |
@@ -213,6 +225,7 @@ Quando `group_by` ou qualquer função de agregação está presente, o endpoint
 | `avg=col` | `AVG("col")` → alias `avg_col` | `?avg=preco` |
 | `count=*` | `COUNT(*)` → alias `count` | `?count=*` |
 | `count=col` | `COUNT("col")` → alias `count_col` | `?count=id` |
+| `count_distinct=col` | `COUNT(DISTINCT "col")` → alias `count_distinct_col` | `?count_distinct=venda` |
 | `min=col` | `MIN("col")` → alias `min_col` | `?min=data` |
 | `max=col` | `MAX("col")` → alias `max_col` | `?max=data` |
 
