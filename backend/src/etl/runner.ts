@@ -87,9 +87,13 @@ async function runPipeline(job: any, runId: number, signal: AbortSignal) {
       log(runId, 'warn', 'Sem coluna código nem coluna data — dados serão inseridos sem deduplicação.')
     }
 
-    const periods = generatePeriods(date_from, date_to, job.window_size)
-    log(runId, 'info', `${periods.length} janela(s) gerada(s) (${job.window_size})`)
+    const periods: { from: string; to: string }[] =
+      job._periods_override ?? generatePeriods(date_from, date_to, job.window_size)
+    log(runId, 'info', job._periods_override
+      ? `Reprocessando ${periods.length} janela(s) que falharam`
+      : `${periods.length} janela(s) gerada(s) (${job.window_size})`)
 
+    const failedPeriods: { from: string; to: string }[] = []
     const limit = pLimit(job.concurrency ?? 4)
     let tableReady = false
     let columns: string[] = []
@@ -237,16 +241,20 @@ async function runPipeline(job: any, runId: number, signal: AbortSignal) {
           }
         } catch (err: any) {
           log(runId, 'error', `Erro em ${period.from} → ${period.to}: ${err.message}`)
+          failedPeriods.push({ from: period.from, to: period.to })
         }
       })
     )
 
-    const results = await Promise.allSettled(tasks)
-    const failures = results.filter(r => r.status === 'rejected').length
-    if (failures > 0) log(runId, 'warn', `${failures} janela(s) falharam`)
+    await Promise.allSettled(tasks)
+    if (failedPeriods.length > 0) {
+      log(runId, 'warn', `${failedPeriods.length} janela(s) falharam — reprocessáveis via POST /jobs/:id/reprocess-failed`)
+    }
 
-    const finalStatus = signal.aborted ? 'stopped' : 'success'
-    db.prepare("UPDATE runs SET status = ?, finished_at = CURRENT_TIMESTAMP WHERE id = ?").run(finalStatus, runId)
+    const finalStatus = signal.aborted ? 'stopped' : failedPeriods.length > 0 ? 'failed' : 'success'
+    const errorMsg = failedPeriods.length > 0 ? `${failedPeriods.length} janela(s) falharam` : null
+    db.prepare("UPDATE runs SET status = ?, error_msg = ?, failed_periods = ?, finished_at = CURRENT_TIMESTAMP WHERE id = ?")
+      .run(finalStatus, errorMsg, failedPeriods.length > 0 ? JSON.stringify(failedPeriods) : null, runId)
     db.prepare("UPDATE jobs SET status = 'idle', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(job.id)
     log(runId, 'info', `Job finalizado: ${finalStatus}`)
     callWebhook(job, runId, finalStatus, log)

@@ -101,4 +101,34 @@ export async function jobRoutes(app: FastifyInstance) {
       return { ok: true, run_id: runId }
     }
   )
+
+  // Reprocessa apenas as janelas que falharam de um run anterior
+  app.post<{ Params: { id: string }; Body: { run_id: number } }>(
+    '/jobs/:id/reprocess-failed',
+    async (req, reply) => {
+      const job = db.prepare('SELECT * FROM jobs WHERE id = ?').get(req.params.id) as any
+      if (!job) return reply.code(404).send({ error: 'Not found' })
+      if (job.status === 'running') return reply.code(409).send({ error: 'Job já está rodando' })
+
+      const run = db.prepare('SELECT * FROM runs WHERE id = ? AND job_id = ?')
+        .get(req.body.run_id, req.params.id) as any
+      if (!run) return reply.code(404).send({ error: 'Run não encontrado' })
+
+      let periods: { from: string; to: string }[] = []
+      try { periods = run.failed_periods ? JSON.parse(run.failed_periods) : [] } catch { /* ignore */ }
+      if (periods.length === 0) {
+        return reply.code(400).send({ error: 'Run não tem janelas falhas para reprocessar' })
+      }
+
+      const override = {
+        ...job,
+        date_mode: 'fixed',
+        date_from: periods[0].from,
+        date_to: periods[periods.length - 1].to,
+        _periods_override: periods,
+      }
+      const runId = await startJob(override)
+      return { ok: true, run_id: runId, periods: periods.length }
+    }
+  )
 }
