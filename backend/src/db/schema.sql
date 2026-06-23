@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS runs (
   rows_read    INTEGER NOT NULL DEFAULT 0,
   rows_written INTEGER NOT NULL DEFAULT 0,
   error_msg    TEXT,
+  failed_periods TEXT,
   started_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
   finished_at  DATETIME
 );

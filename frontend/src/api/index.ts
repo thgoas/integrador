@@ -63,6 +63,11 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ date_from, date_to }),
       }),
+    reprocessFailed: (id: number, run_id: number) =>
+      request<{ ok: boolean; run_id: number; periods: number }>(`/jobs/${id}/reprocess-failed`, {
+        method: 'POST',
+        body: JSON.stringify({ run_id }),
+      }),
   },
 
   runs: {

@@ -120,6 +120,7 @@ export interface Run {
   rows_read: number
   rows_written: number
   error_msg: string | null
+  failed_periods: string | null
   started_at: string
   finished_at: string | null
 }

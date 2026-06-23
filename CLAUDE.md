@@ -317,6 +317,23 @@ como EAN, CNPJ, IDs com zero à esquerda que devem ser **texto**), use `types`:
 
 Formato antigo (array direto) continua funcionando sem mudanças.
 
+## Reprocessamento de janelas que falharam
+
+Cada janela (período) roda isolada; se uma falha (ex.: deadlock), o erro é capturado,
+as demais continuam e o run termina com status **`failed`**. As janelas falhas ficam
+persistidas em `runs.failed_periods` (JSON `[{ "from", "to" }]`).
+
+```
+POST /api/jobs/:id/reprocess-failed   { run_id }
+→ { ok: true, run_id, periods: N }   # reroda só as janelas que falharam naquele run
+```
+
+- Lê `runs.failed_periods` do run informado e reprocessa exatamente aquelas janelas
+  (via override interno `_periods_override` no runner, sem regerar todo o intervalo).
+- Se o run não tiver janelas falhas, retorna 400.
+- Útil para deadlocks: depois de baixar `concurrency` para 1, reprocessar só os meses
+  que travaram em vez do range inteiro.
+
 ## Webhook pós-execução
 
 Se `webhook_url` estiver configurado no job, após cada run o backend faz:

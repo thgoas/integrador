@@ -63,6 +63,20 @@ export function JobDetail() {
     }
   }
 
+  const reprocessFailed = async (runId: number) => {
+    setActionError('')
+    try {
+      const r = await api.jobs.reprocessFailed(Number(id), runId)
+      setActiveRunId(r.run_id)
+      load()
+    } catch (err: any) { setActionError(err.message) }
+  }
+
+  const failedCount = (run: Run): number => {
+    if (!run.failed_periods) return 0
+    try { return JSON.parse(run.failed_periods).length } catch { return 0 }
+  }
+
   if (!job) return <div style={s.page}><p style={{ color: '#64748b' }}>Carregando...</p></div>
 
   const latestRun = runs[0]
@@ -166,6 +180,15 @@ export function JobDetail() {
                   <td style={s.td}>{dur !== null ? `${dur}s` : '...'}</td>
                   <td style={s.td}>
                     <button style={s.btnSm} onClick={() => setActiveRunId(run.id)}>Ver logs</button>
+                    {failedCount(run) > 0 && job.status !== 'running' && (
+                      <button
+                        style={{ ...s.btnSm, marginLeft: 8 }}
+                        onClick={() => reprocessFailed(run.id)}
+                        title={`Reprocessar ${failedCount(run)} janela(s) que falharam`}
+                      >
+                        Reprocessar falhas ({failedCount(run)})
+                      </button>
+                    )}
                   </td>
                 </tr>
               )

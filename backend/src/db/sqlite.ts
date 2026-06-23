@@ -42,6 +42,7 @@ export function runMigrations() {
     "ALTER TABLE jobs ADD COLUMN field_mapping TEXT",
     "ALTER TABLE jobs ADD COLUMN transform_script TEXT",
     "ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE runs ADD COLUMN failed_periods TEXT",
   ]
   for (const sql of alterations) {
     try { db.exec(sql) } catch { /* column already exists */ }
