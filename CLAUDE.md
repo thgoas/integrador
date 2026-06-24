@@ -17,6 +17,19 @@ Login padrão: `admin` / `admin123`
 
 > **Node 25+**: `tsx/esm` tem incompatibilidade com `pino-pretty` no Node 25. Use `npm run build && node --experimental-sqlite --env-file=.env dist/index.js` para rodar o backend compilado.
 
+### Testes
+
+```bash
+cd backend && npm test          # roda a suíte uma vez (vitest run)
+cd backend && npm run test:watch # modo watch
+```
+
+Cobertura na lógica pura (sem I/O) do ETL — `backend/test/`: `template.ts`
+(substituição de variáveis, `{{loja}}` como lista SQL), `periods.ts` (janelas
+day/week/month, bissexto, clamping) e `transform.ts` (applyMapping, resolveColumnTypes,
+runTransformScript). Camadas com I/O (loader/extractor/loaders pg) não têm testes.
+Os testes ficam fora de `src/`, então não entram no `tsc`/`dist`.
+
 ### Índices no PostgreSQL de destino
 
 Para acelerar as consultas agregadas por (data, loja/empresa) — backfill do Painel:
