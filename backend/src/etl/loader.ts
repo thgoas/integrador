@@ -93,6 +93,29 @@ export async function ensureTable(
   }
 }
 
+/**
+ * Remove índices únicos auto-criados (convenção `uq_<tabela>_<col>`) quando o job
+ * deixa de usar `code_column`. Sem isso, um índice único deixado por uma config
+ * anterior (modo upsert) bloqueia o INSERT do modo DELETE+INSERT por período —
+ * pois a mesma chave (ex: `codigo` de estoque) reaparece em vários períodos.
+ * Só remove índices que seguem a convenção de nomes deste app e que são UNIQUE.
+ */
+export async function dropAutoUniqueIndexes(destinationTable: string): Promise<string[]> {
+  const prefix = `uq_${destinationTable}_`.replace(/[^a-z0-9_]/gi, '_')
+  const res = await destPool.query<{ indexname: string; indexdef: string }>(
+    `SELECT indexname, indexdef FROM pg_indexes WHERE tablename = $1`,
+    [destinationTable]
+  )
+  const dropped: string[] = []
+  for (const r of res.rows) {
+    if (r.indexname.startsWith(prefix) && /CREATE UNIQUE INDEX/i.test(r.indexdef)) {
+      await destPool.query(`DROP INDEX IF EXISTS "${r.indexname}"`)
+      dropped.push(r.indexname)
+    }
+  }
+  return dropped
+}
+
 export async function syncColumns(
   destinationTable: string,
   columns: string[],

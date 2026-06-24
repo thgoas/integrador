@@ -156,6 +156,12 @@ POST /api/jobs/:id/start
 | Só `date_column` | DELETE período + INSERT direto |
 | Nenhuma | INSERT puro (pode duplicar em re-runs) |
 
+> **Troca de modo é auto-curável:** o modo upsert cria um índice único `uq_<tabela>_<code_column>`.
+> Ao rodar um job **sem `code_column`** (modo DELETE+INSERT ou INSERT puro), o runner chama
+> `dropAutoUniqueIndexes` e remove índices únicos órfãos que sigam essa convenção — senão o
+> mesmo valor (ex: `codigo` de estoque, que reaparece em todo período) violaria a unicidade no
+> INSERT direto. Só remove índices `uq_<tabela>_*` que são `UNIQUE` (convenção deste app).
+
 ## Template SQL / Endpoint
 
 Variáveis disponíveis em `sql_template` (DB) e `api_endpoint` (API):

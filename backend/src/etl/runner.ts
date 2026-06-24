@@ -5,7 +5,7 @@ import { generatePeriods } from './periods.js'
 import { renderTemplate } from './template.js'
 import { extractChunked } from './extractor.js'
 import { extractApiChunked } from './api-extractor.js'
-import { ensureTable, syncColumns, deletePeriod, copyChunkToTable, upsertChunkToTable, alterColumnTypes } from './loader.js'
+import { ensureTable, syncColumns, deletePeriod, copyChunkToTable, upsertChunkToTable, alterColumnTypes, dropAutoUniqueIndexes } from './loader.js'
 import { applyMapping, runTransformScript, resolveColumnTypes } from './transform.js'
 import { broadcastLog } from '../api/sse.js'
 
@@ -188,6 +188,14 @@ async function runPipeline(job: any, runId: number, signal: AbortSignal) {
                     log(runId, 'info', `Criando/verificando tabela destino: "${job.destination_table}"`)
                     await ensureTable(job.destination_table, columns, sampleRow, job.code_column, typeOverrides)
                     await syncColumns(job.destination_table, columns, sampleRow, typeOverrides)
+                    // Modo DELETE+INSERT: remove índices únicos órfãos de uma config upsert
+                    // anterior, que bloqueariam o INSERT (mesma chave reaparece em outros períodos).
+                    if (!job.code_column) {
+                      const dropped = await dropAutoUniqueIndexes(job.destination_table)
+                      for (const idx of dropped) {
+                        log(runId, 'info', `Índice único obsoleto removido: "${idx}" (modo DELETE+INSERT por período)`)
+                      }
+                    }
                     const altered = await alterColumnTypes(job.destination_table, typeOverrides)
                     for (const c of altered.changed) {
                       log(runId, 'info', `Tipo da coluna "${c.column}" alterado: ${c.from} → ${c.to}`)
