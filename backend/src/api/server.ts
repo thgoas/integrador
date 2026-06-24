@@ -9,8 +9,12 @@ import { connectionRoutes } from './routes/connections.js'
 import { jobRoutes } from './routes/jobs.js'
 import { runRoutes } from './routes/runs.js'
 import { dataRoutes } from './routes/data.js'
+import { estoqueRoutes } from './routes/estoque.js'
 import { apiConnectionRoutes } from './routes/api-connections.js'
 import { tokenRoutes } from './routes/tokens.js'
+
+// Prefixos de leitura acessíveis por token de API (itg_) — somente GET.
+const API_TOKEN_READ_PREFIXES = ['/api/data', '/api/estoque']
 
 export async function buildServer() {
   const app = Fastify({ logger: true })
@@ -44,8 +48,9 @@ export async function buildServer() {
       if (!row) return void reply.code(401).send({ error: 'Token inválido' })
 
       const path = req.url.split('?')[0]
-      if (req.method !== 'GET' || !path.startsWith('/api/data')) {
-        return void reply.code(403).send({ error: 'API token permite apenas GET /api/data/*' })
+      const allowed = req.method === 'GET' && API_TOKEN_READ_PREFIXES.some(p => path.startsWith(p))
+      if (!allowed) {
+        return void reply.code(403).send({ error: 'API token permite apenas GET /api/data/* e /api/estoque/*' })
       }
 
       getDb().prepare('UPDATE api_tokens SET last_used_at = CURRENT_TIMESTAMP WHERE id = ?').run(row.id)
@@ -68,6 +73,7 @@ export async function buildServer() {
   app.register(jobRoutes, { prefix: '/api' })
   app.register(runRoutes, { prefix: '/api' })
   app.register(dataRoutes, { prefix: '/api' })
+  app.register(estoqueRoutes, { prefix: '/api' })
   app.register(apiConnectionRoutes, { prefix: '/api' })
   app.register(tokenRoutes, { prefix: '/api' })
 

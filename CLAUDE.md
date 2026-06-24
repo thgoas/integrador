@@ -70,6 +70,7 @@ backend/src/
       jobs.ts               # CRUD jobs + start/stop/reprocess
       runs.ts               # GET runs + polling de logs
       data.ts               # GET /data (lista tabelas), GET /data/:table/columns, GET /data/:table (filtros dinâmicos), POST /data/:table
+      estoque.ts            # GET /estoque/custo-atual — JOIN estoques×produtos agregado por (empresa, loja)
       tokens.ts             # CRUD tokens de API — POST/GET/DELETE /auth/tokens
     sse.ts                  # broadcast SSE (mantido, sem subscribers ativos)
   db/
@@ -254,6 +255,29 @@ Quando `group_by` ou qualquer função de agregação está presente, o endpoint
 - `limit`/`offset` paginam os grupos normalmente
 - Referência completa: [`docs/api-data-endpoint.md`](docs/api-data-endpoint.md)
 
+## Endpoint de custo atual de estoque
+
+Endpoint dedicado que faz o `JOIN estoques × produtos` e agrega **no banco**, devolvendo ~1 linha
+por `(empresa, loja)` em vez de paginar milhões de linhas por HTTP (o endpoint genérico
+`GET /api/data/estoques?group_by=...` estourava 504). Fonte: [`src/api/routes/estoque.ts`](backend/src/api/routes/estoque.ts) — spec original em [`SPEC-ENDPOINT-CUSTO-ATUAL.md`](SPEC-ENDPOINT-CUSTO-ATUAL.md).
+
+```
+GET /api/estoque/custo-atual?empresa=abys&loja=006&data=2026-06-24
+→ { data: [{ empresa, loja, pecas, custo_atual }], data_referencia }
+```
+
+| Param (opcional) | Efeito |
+|---|---|
+| `empresa` | Filtra por empresa; omitido = todas |
+| `loja` | Filtra por uma loja; omitido = todas |
+| `data` (`YYYY-MM-DD`) | Saldo "a esta data" (`estoques.data <= valor`); default = hoje |
+
+- `pecas` = `SUM(qtde)`, `custo_atual` = `SUM(qtde × produtos.custo)` (custo **atual** do cadastro, nunca congelado).
+- O `JOIN` casa por `produto` **e** `empresa` — o mesmo código de produto pode existir em empresas diferentes com custos distintos.
+- Apenas lojas com `pecas > 0` (`HAVING SUM(qtde) > 0`).
+- Acessível por **JWT ou token de API** (`itg_...`). O escopo do token de API foi ampliado de `GET /api/data/*` para também incluir `GET /api/estoque/*`.
+- Sem materialized view a query varre toda a tabela `estoques`; para escala, a spec recomenda índice em `estoques (empresa, loja, produto, data)` + `produtos (empresa, produto)` e, idealmente, uma view de saldo mantida pelo ETL.
+
 ## Tokens de API
 
 Tokens de longa duração para integrar Power BI e sistemas externos sem precisar de login periódico.
@@ -265,7 +289,7 @@ DELETE /api/auth/tokens/:id         → { ok: true }
 ```
 
 - **Formato:** `itg_<64 hex chars>` — armazenado como hash SHA-256 (valor bruto nunca persiste)
-- **Escopo restrito:** apenas `GET /api/data/*` — qualquer outra rota retorna 403
+- **Escopo restrito:** apenas `GET /api/data/*` e `GET /api/estoque/*` — qualquer outra rota retorna 403
 - **Sem expiração** — válido até revogação manual
 - **Uso:** `Authorization: Bearer itg_<valor>`
 - `last_used_at` atualizado a cada requisição autenticada via token
@@ -376,7 +400,7 @@ Timeout de 10s. Falhas são registradas nos logs do run (nível `warn`), não in
 - **Tabela destino auto-criada** — tipos inferidos do primeiro chunk (`Date` → TIMESTAMPTZ, int → BIGINT, etc.)
 - **`fetch` nativo para APIs** — Node 22+ tem fetch global; sem dependência externa para o extrator de API
 - **`api_connections` tabela separada** — evita alterar CHECK constraint da tabela `connections` no SQLite
-- **Tokens de API com hash SHA-256** — valor bruto nunca persiste; escopo restrito a GET /api/data/* para segurança
+- **Tokens de API com hash SHA-256** — valor bruto nunca persiste; escopo restrito a GET /api/data/* e GET /api/estoque/* para segurança
 - **Filtros dinâmicos via query string** — operadores sufixados (`__gt`, `__like`, `__in` etc.) com whitelist fixa, valores sempre parametrizados
 
 ## Agendamento
