@@ -17,6 +17,19 @@ Login padrão: `admin` / `admin123`
 
 > **Node 25+**: `tsx/esm` tem incompatibilidade com `pino-pretty` no Node 25. Use `npm run build && node --experimental-sqlite --env-file=.env dist/index.js` para rodar o backend compilado.
 
+### Testes
+
+```bash
+cd backend && npm test          # roda a suíte uma vez (vitest run)
+cd backend && npm run test:watch # modo watch
+```
+
+Cobertura na lógica pura (sem I/O) do ETL — `backend/test/`: `template.ts`
+(substituição de variáveis, `{{loja}}` como lista SQL), `periods.ts` (janelas
+day/week/month, bissexto, clamping) e `transform.ts` (applyMapping, resolveColumnTypes,
+runTransformScript). Camadas com I/O (loader/extractor/loaders pg) não têm testes.
+Os testes ficam fora de `src/`, então não entram no `tsc`/`dist`.
+
 ### Índices no PostgreSQL de destino
 
 Para acelerar as consultas agregadas por (data, loja/empresa) — backfill do Painel:
@@ -155,6 +168,12 @@ POST /api/jobs/:id/start
 | `code_column` preenchida | Upsert: INSERT ON CONFLICT DO UPDATE |
 | Só `date_column` | DELETE período + INSERT direto |
 | Nenhuma | INSERT puro (pode duplicar em re-runs) |
+
+> **Troca de modo é auto-curável:** o modo upsert cria um índice único `uq_<tabela>_<code_column>`.
+> Ao rodar um job **sem `code_column`** (modo DELETE+INSERT ou INSERT puro), o runner chama
+> `dropAutoUniqueIndexes` e remove índices únicos órfãos que sigam essa convenção — senão o
+> mesmo valor (ex: `codigo` de estoque, que reaparece em todo período) violaria a unicidade no
+> INSERT direto. Só remove índices `uq_<tabela>_*` que são `UNIQUE` (convenção deste app).
 
 ## Template SQL / Endpoint
 
