@@ -53,8 +53,18 @@ cd backend && npm run build && npm run refresh-saldo
 
 Full refresh: `CREATE TABLE IF NOT EXISTS estoque_saldo` + `TRUNCATE` + `INSERT…SELECT
 SUM(qtde) GROUP BY (empresa, loja, produto)` numa transação (o endpoint nunca vê a tabela
-pela metade). Idempotente; pula se `estoques` não existir. Deve ser **agendado** (cron) para
-manter o saldo fresco. Fonte: [`src/scripts/refresh-estoque-saldo.ts`](backend/src/scripts/refresh-estoque-saldo.ts).
+pela metade). Idempotente; pula se `estoques` não existir. Fonte: [`src/scripts/refresh-estoque-saldo.ts`](backend/src/scripts/refresh-estoque-saldo.ts).
+
+**Agendamento (cron, produção Linux):** wrapper [`scripts/refresh-saldo.sh`](backend/scripts/refresh-saldo.sh)
+resolve o dir do backend pela própria localização e roda o `dist`. Rodar 1x/dia de madrugada
+(fora do horário de uso, pois o `TRUNCATE` segura lock durante o refresh). Crontab:
+
+```cron
+0 3 * * * /caminho/integrador/backend/scripts/refresh-saldo.sh >> /var/log/integrador/refresh-saldo.log 2>&1
+```
+
+Cron não herda o PATH interativo — se o `node` for via nvm/fnm, prefixe a linha com
+`NODE_BIN=/caminho/abs/node`. Pré-requisito: `npm run build` no deploy (o wrapper não compila).
 
 ## Stack
 
