@@ -32,18 +32,28 @@ export async function estoqueRoutes(app: FastifyInstance) {
       conditions.push(`e.loja = $${values.length}`)
     }
 
-    // JOIN APENAS por produto (ver seção 4 da spec). `produtos` é catálogo global:
-    // 1 linha por produto, com empresa multi-valor ("abys, o&a") e custo único. Já
-    // `estoques.empresa` é single-valor — casar por empresa ("abys, o&a" = "abys")
-    // descartaria TODAS as linhas (resultado vazio). O escopo por empresa vem de estoques.
+    // JOIN por (produto, empresa) com o catálogo EXPANDIDO por empresa.
+    // `produtos.empresa` é multi-valor ("abys, o&a") e `estoques.empresa` é single-valor
+    // ("abys"), então um equi-join direto ("abys, o&a" = "abys") descartaria tudo (data: []).
+    // A subquery expande cada produto em 1 linha por empresa (unnest do split por vírgula),
+    // permitindo casar por empresa. Hoje "abys, o&a" → 2 linhas com o mesmo custo (resultado
+    // idêntico ao de casar só por produto); no futuro, o mesmo código pode pertencer a outra
+    // empresa com custo próprio (linha separada no catálogo) e casa só com o estoque dela.
     const sql = `
       SELECT e.empresa,
              e.loja,
              SUM(e.qtde)              AS pecas,
              SUM(e.qtde * p.custo)    AS custo_atual
       FROM estoques e
-      JOIN produtos p
+      JOIN (
+        SELECT pr.produto,
+               pr.custo,
+               trim(emp) AS empresa
+        FROM produtos pr,
+             unnest(regexp_split_to_array(pr.empresa, ',')) AS emp
+      ) p
         ON p.produto = e.produto
+       AND p.empresa = e.empresa
       WHERE ${conditions.join(' AND ')}
       GROUP BY e.empresa, e.loja
       HAVING SUM(e.qtde) > 0
