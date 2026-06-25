@@ -136,27 +136,34 @@ o catálogo vier a ter duas linhas que cubram a mesma empresa para o mesmo produ
 multiplica as linhas de estoque (infla `pecas`/`custo_atual`). Garantir unicidade de
 `(produto, empresa)` após a expansão.
 
-**Sintoma do bug:** o endpoint responde 200 com `{"data": []}` para qualquer filtro (inclusive
-`loja=006`, que comprovadamente tem ~2.124 produtos em estoque). Causa: o inner join com
-`p.empresa = e.empresa` descarta todas as linhas. Fix: remover a condição de empresa do join.
+**Sintoma do bug original:** o endpoint respondia 200 com `{"data": []}` para qualquer filtro
+(inclusive `loja=006`, que comprovadamente tem ~2.124 produtos em estoque). Causa: o inner join
+direto `p.empresa = e.empresa` (`"abys, o&a"` ≠ `"abys"`) descartava todas as linhas. Fix: o
+JOIN com catálogo expandido acima. Validado na loja 006: 21.029 peças, R$ 1.747.731.
 
 ---
 
-## 5. Performance — recomendações
+## 5. Performance — saldo materializado (IMPLEMENTADO)
 
-A query acima varre ~45,6M linhas a cada chamada. Mesmo agregando no banco, sem apoio pode
-levar de segundos a ~1min. Como o painel pode chamar isto a cada carga, recomenda-se:
+A query sobre `estoques` (~45,6M linhas) levava ~26s/loja e dava **504** sem filtro. Resolvido
+com pré-agregação mantida pelo ETL do integrador:
 
-1. **Índice** em `estoques (empresa, loja, produto, data)` e em `produtos (empresa, produto)`.
-2. **Idealmente, uma tabela/materialized view de saldo** mantida pelo próprio ETL do
-   integrador — ex.: `estoque_saldo (empresa, loja, produto, pecas)` atualizada
-   incrementalmente. Aí o endpoint só faz `JOIN` dessa view com `produtos` e agrega por
-   loja → resposta em milissegundos, independentemente do tamanho de `estoques`.
-3. Se materializar, expor também a **data/hora da última atualização** do saldo na resposta
-   (campo `saldo_atualizado_em`) para o painel saber o frescor.
+1. ✅ **Tabela `estoque_saldo (empresa, loja, produto, pecas, atualizado_em)`** com o saldo
+   pré-somado. O endpoint só faz `JOIN estoque_saldo × produtos` e agrega por loja → resposta
+   em milissegundos, independentemente do tamanho de `estoques`. PK `(empresa, loja, produto)`.
+2. ✅ **Job de full refresh** (`npm run refresh-saldo`): `TRUNCATE` + `INSERT…SELECT SUM(qtde)
+   GROUP BY (empresa, loja, produto)` numa transação. Deve ser agendado (cron) no integrador.
+   Fonte: `backend/src/scripts/refresh-estoque-saldo.ts`.
+3. ✅ **`saldo_atualizado_em`** na resposta (`MAX(atualizado_em)`) para o painel saber o frescor,
+   e **`fonte`** (`"saldo"` rápido | `"estoques"` fallback).
 
-Sem a materialized view o endpoint ainda resolve o 504 (não pagina o resultado), mas pode
-ficar lento sob carga — a view é o que o torna instantâneo.
+**`data` histórica:** o snapshot é do saldo **atual**. Quando vem `data` no passado, o endpoint
+cai no scan direto de `estoques` (`fonte: "estoques"`, lento mas correto). Se `estoque_saldo`
+ainda não existir, também cai no scan direto. O caso comum do painel (custo atual) usa o
+caminho rápido.
+
+> Refresh é **full** hoje (recalcula tudo). Evoluir para incremental — atualizar só os
+> `(empresa, loja, produto)` alterados — é a próxima otimização se o full ficar pesado.
 
 ---
 

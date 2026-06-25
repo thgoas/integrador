@@ -7,6 +7,7 @@
     "build": "tsc && cp src/db/schema.sql dist/db/schema.sql",
     "start": "node --experimental-sqlite --env-file=.env dist/index.js",
     "indexes": "node --env-file=.env dist/scripts/create-indexes.js",
+    "refresh-saldo": "node --env-file=.env dist/scripts/refresh-estoque-saldo.js",
     "test": "vitest run",
     "test:watch": "vitest"
   },
