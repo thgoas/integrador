@@ -77,8 +77,7 @@ SELECT
   SUM(e.qtde * p.custo)       AS custo_atual
 FROM estoques e
 JOIN produtos p
-  ON p.produto = e.produto
- AND p.empresa = e.empresa        -- ver seção 4 (multi-empresa)
+  ON p.produto = e.produto        -- SÓ por produto (catálogo global) — ver seção 4
 WHERE e.data <= :data_referencia
   -- aplicar filtros opcionais de empresa/loja quando vierem
 GROUP BY e.empresa, e.loja
@@ -90,15 +89,29 @@ HAVING SUM(e.qtde) > 0;
 
 ---
 
-## 4. Multi-empresa (cuidado obrigatório)
+## 4. Multi-empresa — JOIN APENAS por produto (NÃO por empresa)
 
-Os códigos de produto **podem repetir entre empresas** (ex.: produto `714359` existir em
-`abys` e em `o&a` com custos diferentes). Portanto o `JOIN` **precisa casar também por
-`empresa`** (`p.empresa = e.empresa`), nunca só por `produto`. Caso o cadastro de produtos
-seja global (sem empresa), confirmar com o time do painel antes — mudaria a regra.
+⚠️ **Correção crítica (validada nos dados reais).** Uma versão anterior desta spec sugeria
+casar o join por `produto` **e** `empresa`. Isso está **errado** e produz resultado vazio.
 
-Valores de `empresa` hoje observados: `abys` (grupos abys-calçados + abys-sports),
-`o&a` (oscar-abys). O campo `empresa` existe tanto em `estoques` quanto em `produtos`.
+O cadastro `produtos` é um **catálogo global**: cada produto é uma única linha, com a coluna
+`empresa` em formato **multi-valor** — ex.: `empresa = "abys, o&a"` — indicando a quais
+empresas o produto pertence, e um **único** `custo`. Confirmado: 100% das linhas de `produtos`
+têm `empresa = "abys, o&a"`. Já em `estoques` o `empresa` é **single-valor** (`"abys"`, `"o&a"`).
+
+Portanto:
+
+```sql
+JOIN produtos p ON p.produto = e.produto      -- ✅ correto
+-- AND p.empresa = e.empresa                  -- ❌ NUNCA: "abys, o&a" = "abys" nunca casa → vazio
+```
+
+O escopo por empresa já vem do lado de `estoques` (cada movimento é de uma empresa+loja); o
+custo é global por produto. Não há custo distinto por empresa para o mesmo código.
+
+**Sintoma do bug:** o endpoint responde 200 com `{"data": []}` para qualquer filtro (inclusive
+`loja=006`, que comprovadamente tem ~2.124 produtos em estoque). Causa: o inner join com
+`p.empresa = e.empresa` descarta todas as linhas. Fix: remover a condição de empresa do join.
 
 ---
 
@@ -164,7 +177,7 @@ Enquanto o endpoint não existe, o painel usa o `EstoqueProduto` já populado (s
 ## 9. Resumo do que pedimos ao time do integrador
 
 1. Um endpoint `GET /api/estoque/custo-atual` conforme seção 2.
-2. Join `estoques × produtos` por **`produto` + `empresa`** (seção 4).
+2. Join `estoques × produtos` **APENAS por `produto`** — nunca por empresa (seção 4). ⚠️ é a causa do `data: []` atual.
 3. Agregação por loja no banco; retorno de ~38 linhas (seção 3).
 4. Idealmente apoiado por **tabela de saldo materializada** mantida pelo ETL (seção 5).
 5. Mesmo esquema de auth (Bearer token GET-only) já em uso.

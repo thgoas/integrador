@@ -32,8 +32,10 @@ export async function estoqueRoutes(app: FastifyInstance) {
       conditions.push(`e.loja = $${values.length}`)
     }
 
-    // JOIN casa por produto + empresa: o mesmo código de produto pode existir em empresas
-    // diferentes com custos diferentes (ver seção 4 da spec).
+    // JOIN APENAS por produto (ver seção 4 da spec). `produtos` é catálogo global:
+    // 1 linha por produto, com empresa multi-valor ("abys, o&a") e custo único. Já
+    // `estoques.empresa` é single-valor — casar por empresa ("abys, o&a" = "abys")
+    // descartaria TODAS as linhas (resultado vazio). O escopo por empresa vem de estoques.
     const sql = `
       SELECT e.empresa,
              e.loja,
@@ -42,7 +44,6 @@ export async function estoqueRoutes(app: FastifyInstance) {
       FROM estoques e
       JOIN produtos p
         ON p.produto = e.produto
-       AND p.empresa = e.empresa
       WHERE ${conditions.join(' AND ')}
       GROUP BY e.empresa, e.loja
       HAVING SUM(e.qtde) > 0
