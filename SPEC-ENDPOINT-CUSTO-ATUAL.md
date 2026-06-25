@@ -76,8 +76,14 @@ SELECT
   SUM(e.qtde)                 AS pecas,
   SUM(e.qtde * p.custo)       AS custo_atual
 FROM estoques e
-JOIN produtos p
-  ON p.produto = e.produto        -- SÓ por produto (catálogo global) — ver seção 4
+JOIN (
+  -- catálogo expandido: 1 linha por (produto, empresa) — ver seção 4
+  SELECT pr.produto, pr.custo, trim(emp) AS empresa
+  FROM produtos pr,
+       unnest(regexp_split_to_array(pr.empresa, ',')) AS emp
+) p
+  ON p.produto = e.produto
+ AND p.empresa = e.empresa
 WHERE e.data <= :data_referencia
   -- aplicar filtros opcionais de empresa/loja quando vierem
 GROUP BY e.empresa, e.loja
@@ -89,25 +95,46 @@ HAVING SUM(e.qtde) > 0;
 
 ---
 
-## 4. Multi-empresa — JOIN APENAS por produto (NÃO por empresa)
+## 4. Multi-empresa — JOIN por (produto, empresa) com catálogo expandido
 
-⚠️ **Correção crítica (validada nos dados reais).** Uma versão anterior desta spec sugeria
-casar o join por `produto` **e** `empresa`. Isso está **errado** e produz resultado vazio.
+Hoje o cadastro `produtos` tem a coluna `empresa` em formato **multi-valor** — ex.:
+`empresa = "abys, o&a"` — indicando a quais empresas o produto pertence, com um **único**
+`custo`. Confirmado: 100% das linhas atuais têm `empresa = "abys, o&a"`. Já em `estoques` o
+`empresa` é **single-valor** (`"abys"`, `"o&a"`).
 
-O cadastro `produtos` é um **catálogo global**: cada produto é uma única linha, com a coluna
-`empresa` em formato **multi-valor** — ex.: `empresa = "abys, o&a"` — indicando a quais
-empresas o produto pertence, e um **único** `custo`. Confirmado: 100% das linhas de `produtos`
-têm `empresa = "abys, o&a"`. Já em `estoques` o `empresa` é **single-valor** (`"abys"`, `"o&a"`).
-
-Portanto:
+Por isso um equi-join direto **não funciona** e produz resultado vazio:
 
 ```sql
-JOIN produtos p ON p.produto = e.produto      -- ✅ correto
--- AND p.empresa = e.empresa                  -- ❌ NUNCA: "abys, o&a" = "abys" nunca casa → vazio
+-- ❌ NUNCA: "abys, o&a" = "abys" nunca casa → data: []
+JOIN produtos p ON p.produto = e.produto AND p.empresa = e.empresa
 ```
 
-O escopo por empresa já vem do lado de `estoques` (cada movimento é de uma empresa+loja); o
-custo é global por produto. Não há custo distinto por empresa para o mesmo código.
+**Requisito de futuro:** vão entrar **outras empresas**, e o **mesmo código** poderá ser um
+produto **diferente, com custo próprio** por empresa. Logo a relação por empresa **precisa
+existir** — não basta casar só por produto.
+
+**Solução: expandir o catálogo por empresa e casar por `(produto, empresa)`** (ver SQL da
+seção 3):
+
+```sql
+JOIN (
+  SELECT pr.produto, pr.custo, trim(emp) AS empresa
+  FROM produtos pr,
+       unnest(regexp_split_to_array(pr.empresa, ',')) AS emp
+) p
+  ON p.produto = e.produto AND p.empresa = e.empresa   -- ✅
+```
+
+- **Hoje:** `"abys, o&a"` expande em 2 linhas (`abys`, `o&a`) com o mesmo custo → cada estoque
+  casa com a sua empresa. Resultado idêntico ao de casar só por produto (não fica vazio).
+- **Futuro:** a empresa nova entra como linha própria no catálogo (ex.: `empresa = "xyz"`,
+  custo próprio) e casa **só** com o estoque de `xyz`. A relação por empresa passa a valer
+  sem mudar a query.
+
+**Integridade necessária:** cada par `(produto, empresa)` deve resolver para **um** custo. Se
+o catálogo vier a ter duas linhas que cubram a mesma empresa para o mesmo produto, o join
+multiplica as linhas de estoque (infla `pecas`/`custo_atual`). Garantir unicidade de
+`(produto, empresa)` após a expansão.
 
 **Sintoma do bug:** o endpoint responde 200 com `{"data": []}` para qualquer filtro (inclusive
 `loja=006`, que comprovadamente tem ~2.124 produtos em estoque). Causa: o inner join com
@@ -177,7 +204,7 @@ Enquanto o endpoint não existe, o painel usa o `EstoqueProduto` já populado (s
 ## 9. Resumo do que pedimos ao time do integrador
 
 1. Um endpoint `GET /api/estoque/custo-atual` conforme seção 2.
-2. Join `estoques × produtos` **APENAS por `produto`** — nunca por empresa (seção 4). ⚠️ é a causa do `data: []` atual.
+2. Join `estoques × produtos` por `(produto, empresa)` com o catálogo **expandido** por empresa (`unnest` do `empresa` multi-valor) — seção 4. Um equi-join direto dá `data: []`; casar só por produto resolve hoje mas quebra quando entrarem novas empresas com o mesmo código.
 3. Agregação por loja no banco; retorno de ~38 linhas (seção 3).
 4. Idealmente apoiado por **tabela de saldo materializada** mantida pelo ETL (seção 5).
 5. Mesmo esquema de auth (Bearer token GET-only) já em uso.

@@ -273,7 +273,7 @@ GET /api/estoque/custo-atual?empresa=abys&loja=006&data=2026-06-24
 | `data` (`YYYY-MM-DD`) | Saldo "a esta data" (`estoques.data <= valor`); default = hoje |
 
 - `pecas` = `SUM(qtde)`, `custo_atual` = `SUM(qtde × produtos.custo)` (custo **atual** do cadastro, nunca congelado).
-- O `JOIN` casa **apenas por `produto`**, nunca por empresa: `produtos` é catálogo global (1 linha/produto, `empresa` multi-valor `"abys, o&a"`, custo único). Casar por empresa contra o `estoques.empresa` single-valor descartaria tudo (`data: []`). O escopo por empresa vem do lado de `estoques`.
+- O `JOIN` casa por `(produto, empresa)` com o catálogo **expandido**: `produtos.empresa` é multi-valor (`"abys, o&a"`) e `estoques.empresa` é single-valor (`"abys"`), então a subquery faz `unnest(regexp_split_to_array(empresa, ','))` para gerar 1 linha por empresa e casar por empresa. Hoje `"abys, o&a"` vira 2 linhas com o mesmo custo (resultado idêntico a casar só por produto); quando entrarem **novas empresas** com o **mesmo código** e custo próprio, cada uma casa só com o estoque dela. Um equi-join direto `p.empresa = e.empresa` daria `data: []`.
 - Apenas lojas com `pecas > 0` (`HAVING SUM(qtde) > 0`).
 - Acessível por **JWT ou token de API** (`itg_...`). O escopo do token de API foi ampliado de `GET /api/data/*` para também incluir `GET /api/estoque/*`.
 - Sem materialized view a query varre toda a tabela `estoques`; para escala, a spec recomenda índice em `estoques (empresa, loja, produto, data)` + `produtos (empresa, produto)` e, idealmente, uma view de saldo mantida pelo ETL.
