@@ -1,0 +1,22 @@
+[Unit]
+Description=Refresh do saldo de estoque (estoque_saldo) do Integrador
+Documentation=https://github.com/  # ajuste se quiser apontar p/ o repo
+# Garante que a rede/Postgres de destino esteja disponível antes de rodar.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+
+# >>> AJUSTE estes 2 campos ao seu servidor <<<
+# Usuário que roda o refresh (precisa ler o .env e ter o dist compilado).
+User=integrador
+# Caminho ABSOLUTO do wrapper versionado (backend/scripts/refresh-saldo.sh).
+ExecStart=/opt/integrador/backend/scripts/refresh-saldo.sh
+
+# Se o `node` estiver via nvm/fnm (não está no PATH do systemd), descomente e
+# aponte para o binário (descubra com `which node` como o usuário acima):
+# Environment=NODE_BIN=/home/integrador/.nvm/versions/node/v22.x/bin/node
+
+# stdout/stderr vão para o journald automaticamente:
+#   journalctl -u refresh-saldo.service
