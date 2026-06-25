@@ -42,6 +42,20 @@ Cria `CREATE INDEX CONCURRENTLY IF NOT EXISTS` em `vendas (dtvenda, empresa, loj
 `estoques (data, loja)` e `cadastros (data_venda, empresa, loja)`. Idempotente; pula
 tabelas/colunas inexistentes. Fonte: [`src/scripts/create-indexes.ts`](backend/src/scripts/create-indexes.ts).
 
+### Saldo de estoque materializado
+
+Pré-soma o saldo de peças por `(empresa, loja, produto)` na tabela `estoque_saldo`, que
+alimenta o caminho rápido do endpoint `GET /api/estoque/custo-atual` (ver seção dedicada):
+
+```bash
+cd backend && npm run build && npm run refresh-saldo
+```
+
+Full refresh: `CREATE TABLE IF NOT EXISTS estoque_saldo` + `TRUNCATE` + `INSERT…SELECT
+SUM(qtde) GROUP BY (empresa, loja, produto)` numa transação (o endpoint nunca vê a tabela
+pela metade). Idempotente; pula se `estoques` não existir. Deve ser **agendado** (cron) para
+manter o saldo fresco. Fonte: [`src/scripts/refresh-estoque-saldo.ts`](backend/src/scripts/refresh-estoque-saldo.ts).
+
 ## Stack
 
 | Camada | Tecnologia |
@@ -263,20 +277,35 @@ por `(empresa, loja)` em vez de paginar milhões de linhas por HTTP (o endpoint 
 
 ```
 GET /api/estoque/custo-atual?empresa=abys&loja=006&data=2026-06-24
-→ { data: [{ empresa, loja, pecas, custo_atual }], data_referencia }
+→ { data: [{ empresa, loja, pecas, custo_atual }], data_referencia, saldo_atualizado_em, fonte }
 ```
 
 | Param (opcional) | Efeito |
 |---|---|
 | `empresa` | Filtra por empresa; omitido = todas |
 | `loja` | Filtra por uma loja; omitido = todas |
-| `data` (`YYYY-MM-DD`) | Saldo "a esta data" (`estoques.data <= valor`); default = hoje |
+| `data` (`YYYY-MM-DD`) | Saldo "a esta data"; default = hoje. Data passada força o scan direto (ver abaixo) |
 
 - `pecas` = `SUM(qtde)`, `custo_atual` = `SUM(qtde × produtos.custo)` (custo **atual** do cadastro, nunca congelado).
-- O `JOIN` casa por `(produto, empresa)` com o catálogo **expandido**: `produtos.empresa` é multi-valor (`"abys, o&a"`) e `estoques.empresa` é single-valor (`"abys"`), então a subquery faz `unnest(regexp_split_to_array(empresa, ','))` para gerar 1 linha por empresa e casar por empresa. Hoje `"abys, o&a"` vira 2 linhas com o mesmo custo (resultado idêntico a casar só por produto); quando entrarem **novas empresas** com o **mesmo código** e custo próprio, cada uma casa só com o estoque dela. Um equi-join direto `p.empresa = e.empresa` daria `data: []`.
-- Apenas lojas com `pecas > 0` (`HAVING SUM(qtde) > 0`).
+- O `JOIN` casa por `(produto, empresa)` com o catálogo **expandido**: `produtos.empresa` é multi-valor (`"abys, o&a"`) e `estoques`/`estoque_saldo`.empresa é single-valor (`"abys"`), então a subquery faz `unnest(regexp_split_to_array(empresa, ','))` para gerar 1 linha por empresa e casar por empresa. Hoje `"abys, o&a"` vira 2 linhas com o mesmo custo (resultado idêntico a casar só por produto); quando entrarem **novas empresas** com o **mesmo código** e custo próprio, cada uma casa só com o estoque dela. Um equi-join direto `p.empresa = e.empresa` daria `data: []`.
+- Apenas lojas com `pecas > 0` (`HAVING SUM(...) > 0`).
 - Acessível por **JWT ou token de API** (`itg_...`). O escopo do token de API foi ampliado de `GET /api/data/*` para também incluir `GET /api/estoque/*`.
-- Sem materialized view a query varre toda a tabela `estoques`; para escala, a spec recomenda índice em `estoques (empresa, loja, produto, data)` + `produtos (empresa, produto)` e, idealmente, uma view de saldo mantida pelo ETL.
+
+### Dois caminhos: saldo materializado (rápido) × scan direto (histórico)
+
+Varrer `estoques` (~45,6M linhas) a cada chamada levava ~26s/loja e dava **504** sem filtro.
+Por isso o endpoint lê de **`estoque_saldo`** — saldo por `(empresa, loja, produto)` pré-somado
+pelo ETL — e responde em milissegundos.
+
+- **`fonte: "saldo"`** (default): lê de `estoque_saldo`, só faz `JOIN produtos` + agrega por loja.
+  `saldo_atualizado_em` traz o `MAX(atualizado_em)` (frescor do último refresh).
+- **`fonte: "estoques"`** (fallback): scan direto na `estoques` com `data <= valor`. Usado quando
+  vem `data` **histórica** (saldo a uma data passada, que o snapshot não cobre) **ou** quando
+  `estoque_saldo` ainda não existe (`42P01`). Lento, mas correto; `saldo_atualizado_em` = `null`.
+
+A `estoque_saldo` é mantida por um **job de full refresh** (`TRUNCATE` + `INSERT…SELECT SUM(qtde)`
+dentro de transação) — ver seção "Saldo de estoque materializado". Integridade necessária:
+`(produto, empresa)` único após a expansão do catálogo, senão o `JOIN` infla a soma.
 
 ## Tokens de API
 
