@@ -4,8 +4,19 @@
  * lê dessa tabela para responder em milissegundos, em vez de varrer os ~45,6M de
  * linhas de `estoques` a cada chamada (que levava ~26s/loja e dava 504 sem filtro).
  *
- * Full refresh: TRUNCATE + INSERT … SELECT SUM(qtde) GROUP BY (empresa, loja, produto),
- * dentro de uma transação para o endpoint nunca ver a tabela pela metade.
+ * Estratégia: build numa tabela nova + swap por RENAME (full refresh):
+ *   1. CREATE TABLE estoque_saldo_new AS SELECT ... (varre estoques; a tabela atual
+ *      continua legível pelo endpoint, sem lock).
+ *   2. DROP da antiga + RENAME da nova — único momento de lock (milissegundos, no commit).
+ * Tudo numa transação, então o endpoint nunca vê a tabela pela metade nem trava durante
+ * o cálculo.
+ *
+ * `produto` herda o tipo nativo de `estoques.produto` (numeric) — SEM cast para text —
+ * para o JOIN com `produtos` continuar `numeric = numeric`. Recriar a tabela a cada run
+ * também "cura" um eventual `estoque_saldo` antigo criado com o tipo errado.
+ *
+ * `HAVING SUM(qtde) > 0` por produto: descarta produtos com saldo zero/negativo (saldo
+ * negativo de dados incompletos é tratado como ausência, não subtrai do total da loja).
  *
  * O saldo é o "atual" (soma de TODAS as movimentações). Consultas com `data` histórica
  * no endpoint não usam esta tabela — caem no scan direto de `estoques`.
@@ -17,17 +28,6 @@
  * Idempotente. Pode ser agendado (cron) no pipeline do integrador.
  */
 import { destPool } from '../config/destination.js'
-
-const DDL = `
-  CREATE TABLE IF NOT EXISTS estoque_saldo (
-    empresa       text   NOT NULL,
-    loja          text   NOT NULL,
-    produto       text   NOT NULL,
-    pecas         numeric,
-    atualizado_em timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (empresa, loja, produto)
-  )
-`
 
 async function tableExists(table: string): Promise<boolean> {
   const r = await destPool.query(
@@ -44,20 +44,33 @@ async function main() {
     return
   }
 
-  await destPool.query(DDL)
-
   const started = Date.now()
   const client = await destPool.connect()
   try {
     await client.query('BEGIN')
-    await client.query('TRUNCATE estoque_saldo')
+    await client.query('DROP TABLE IF EXISTS estoque_saldo_new')
+
+    // produto SEM cast → mantém numeric (tipo de estoques.produto); now() = início da txn.
     const res = await client.query(`
-      INSERT INTO estoque_saldo (empresa, loja, produto, pecas, atualizado_em)
-      SELECT empresa, loja, produto, SUM(qtde), now()
+      CREATE TABLE estoque_saldo_new AS
+      SELECT empresa,
+             loja,
+             produto,
+             SUM(qtde)  AS pecas,
+             now()      AS atualizado_em
       FROM estoques
       GROUP BY empresa, loja, produto
+      HAVING SUM(qtde) > 0
     `)
+
+    // Índice p/ o filtro empresa/loja do endpoint.
+    await client.query('CREATE INDEX ON estoque_saldo_new (empresa, loja)')
+
+    // Swap atômico: a antiga só é trocada no commit (lock de milissegundos).
+    await client.query('DROP TABLE IF EXISTS estoque_saldo')
+    await client.query('ALTER TABLE estoque_saldo_new RENAME TO estoque_saldo')
     await client.query('COMMIT')
+
     const secs = ((Date.now() - started) / 1000).toFixed(1)
     console.log(`✓ estoque_saldo recalculada: ${res.rowCount} linhas (empresa,loja,produto) em ${secs}s`)
   } catch (err) {

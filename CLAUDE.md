@@ -51,13 +51,23 @@ alimenta o caminho rápido do endpoint `GET /api/estoque/custo-atual` (ver seç�
 cd backend && npm run build && npm run refresh-saldo
 ```
 
-Full refresh: `CREATE TABLE IF NOT EXISTS estoque_saldo` + `TRUNCATE` + `INSERT…SELECT
-SUM(qtde) GROUP BY (empresa, loja, produto)` numa transação (o endpoint nunca vê a tabela
-pela metade). Idempotente; pula se `estoques` não existir. Fonte: [`src/scripts/refresh-estoque-saldo.ts`](backend/src/scripts/refresh-estoque-saldo.ts).
+Full refresh por **build + swap**, numa transação: `CREATE TABLE estoque_saldo_new AS SELECT
+… SUM(qtde) GROUP BY (empresa, loja, produto) HAVING SUM(qtde) > 0` → `DROP` da antiga →
+`RENAME`. A tabela atual fica legível pelo endpoint durante o cálculo (sem lock longo); a
+troca só pega lock por milissegundos no commit. Detalhes:
+
+- `produto` herda o tipo **numeric** de `estoques.produto` (CTAS sem cast) — o JOIN com
+  `produtos` fica `numeric = numeric`. Recriar a cada run também corrige uma tabela antiga
+  que tenha sido criada com o tipo errado.
+- `HAVING SUM(qtde) > 0` **por produto**: saldo zero/negativo (dados incompletos) é descartado,
+  não subtrai do total da loja (alinhado à seção 6 da spec; o scan direto do endpoint usa a
+  mesma semântica, então `fonte:"saldo"` e `fonte:"estoques"` batem).
+
+Idempotente; pula se `estoques` não existir. Fonte: [`src/scripts/refresh-estoque-saldo.ts`](backend/src/scripts/refresh-estoque-saldo.ts).
 
 **Agendamento (cron, produção Linux):** wrapper [`scripts/refresh-saldo.sh`](backend/scripts/refresh-saldo.sh)
-resolve o dir do backend pela própria localização e roda o `dist`. Rodar 1x/dia de madrugada
-(fora do horário de uso, pois o `TRUNCATE` segura lock durante o refresh). Crontab:
+resolve o dir do backend pela própria localização e roda o `dist`. Rodar 1x/dia de madrugada.
+Crontab:
 
 ```cron
 0 3 * * * /caminho/integrador/backend/scripts/refresh-saldo.sh >> /var/log/integrador/refresh-saldo.log 2>&1
