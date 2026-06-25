@@ -150,10 +150,13 @@ com pré-agregação mantida pelo ETL do integrador:
 
 1. ✅ **Tabela `estoque_saldo (empresa, loja, produto, pecas, atualizado_em)`** com o saldo
    pré-somado. O endpoint só faz `JOIN estoque_saldo × produtos` e agrega por loja → resposta
-   em milissegundos, independentemente do tamanho de `estoques`. PK `(empresa, loja, produto)`.
-2. ✅ **Job de full refresh** (`npm run refresh-saldo`): `TRUNCATE` + `INSERT…SELECT SUM(qtde)
-   GROUP BY (empresa, loja, produto)` numa transação. Deve ser agendado (cron) no integrador.
-   Fonte: `backend/src/scripts/refresh-estoque-saldo.ts`.
+   em milissegundos, independentemente do tamanho de `estoques`. `produto` é **numeric** (mesmo
+   tipo de `estoques.produto`) para o JOIN ficar `numeric = numeric`.
+2. ✅ **Job de full refresh** (`npm run refresh-saldo`): build + swap numa transação —
+   `CREATE TABLE estoque_saldo_new AS SELECT … SUM(qtde) GROUP BY (empresa, loja, produto)
+   HAVING SUM(qtde) > 0` → `DROP` antiga → `RENAME`. A tabela atual fica legível durante o
+   cálculo; lock só de milissegundos no commit. `HAVING > 0` por produto descarta saldo
+   negativo (seção 6). Deve ser agendado (cron). Fonte: `backend/src/scripts/refresh-estoque-saldo.ts`.
 3. ✅ **`saldo_atualizado_em`** na resposta (`MAX(atualizado_em)`) para o painel saber o frescor,
    e **`fonte`** (`"saldo"` rápido | `"estoques"` fallback).
 

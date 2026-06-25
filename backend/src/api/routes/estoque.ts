@@ -90,19 +90,30 @@ export async function estoqueRoutes(app: FastifyInstance) {
       if (req.query.empresa) { vals.push(req.query.empresa); conds.push(`e.empresa = $${vals.length}`) }
       if (req.query.loja)    { vals.push(req.query.loja);    conds.push(`e.loja = $${vals.length}`) }
 
+      // Agrega por produto com HAVING SUM(qtde) > 0 antes de somar na loja — mesma
+      // semântica do estoque_saldo (saldo negativo por produto vira ausência, não subtrai),
+      // para fonte="estoques" e fonte="saldo" baterem.
       const sql = `
-        SELECT e.empresa,
-               e.loja,
-               SUM(e.qtde)              AS pecas,
-               SUM(e.qtde * p.custo)    AS custo_atual
-        FROM estoques e
-        JOIN (${PRODUTOS_EXPANDIDO}) p
-          ON p.produto = e.produto
-         AND p.empresa = e.empresa
-        WHERE ${conds.join(' AND ')}
-        GROUP BY e.empresa, e.loja
-        HAVING SUM(e.qtde) > 0
-        ORDER BY e.empresa, e.loja
+        SELECT s.empresa,
+               s.loja,
+               SUM(s.pecas)            AS pecas,
+               SUM(s.pecas * s.custo)  AS custo_atual
+        FROM (
+          SELECT e.empresa,
+                 e.loja,
+                 p.custo,
+                 SUM(e.qtde) AS pecas
+          FROM estoques e
+          JOIN (${PRODUTOS_EXPANDIDO}) p
+            ON p.produto = e.produto
+           AND p.empresa = e.empresa
+          WHERE ${conds.join(' AND ')}
+          GROUP BY e.empresa, e.loja, e.produto, p.custo
+          HAVING SUM(e.qtde) > 0
+        ) s
+        GROUP BY s.empresa, s.loja
+        HAVING SUM(s.pecas) > 0
+        ORDER BY s.empresa, s.loja
       `
       const r = await destPool.query<Row>(sql, vals)
       return {
