@@ -1,0 +1,14 @@
+[Unit]
+Description=Agenda o refresh diário do saldo de estoque (03:00)
+
+[Timer]
+# Todo dia às 03:00 (horário do servidor). Veja `man systemd.time` p/ outras cadências.
+OnCalendar=*-*-* 03:00:00
+# Se o servidor estava desligado/suspenso no horário, roda assim que voltar.
+Persistent=true
+# Pequena dispersão p/ não bater exatamente em outros jobs das 03:00 (opcional).
+RandomizedDelaySec=120
+Unit=refresh-saldo.service
+
+[Install]
+WantedBy=timers.target

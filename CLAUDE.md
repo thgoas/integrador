@@ -76,6 +76,9 @@ Crontab:
 Cron não herda o PATH interativo — se o `node` for via nvm/fnm, prefixe a linha com
 `NODE_BIN=/caminho/abs/node`. Pré-requisito: `npm run build` no deploy (o wrapper não compila).
 
+Alternativa recomendada em produção: **systemd timer** (log no `journalctl`, `Persistent=true`
+para runs perdidos, sem dor de PATH). Units e instruções em [`deploy/systemd/`](deploy/systemd/).
+
 ## Stack
 
 | Camada | Tecnologia |
