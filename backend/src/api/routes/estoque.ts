@@ -126,4 +126,55 @@ export async function estoqueRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: err.message })
     }
   })
+
+  // --- Custo MÉDIO por loja (média móvel ponderada das compras) ---
+  // JOIN estoque_saldo × custo_medio_produto por (empresa, produto) — ambos single-valor
+  // (custo_medio_produto.empresa vem de estoques), então é equi-join direto; produto numeric.
+  // Ver SPEC-CUSTO-MEDIO-PRODUTO.md. Depende do refresh `npm run refresh-custo-medio`.
+  app.get<{
+    Querystring: { empresa?: string; loja?: string }
+  }>('/estoque/custo-medio', async (req, reply) => {
+    const vals: unknown[] = []
+    const conds: string[] = []
+    if (req.query.empresa) { vals.push(req.query.empresa); conds.push(`s.empresa = $${vals.length}`) }
+    if (req.query.loja)    { vals.push(req.query.loja);    conds.push(`s.loja = $${vals.length}`) }
+    const where = conds.length ? `WHERE ${conds.join(' AND ')}` : ''
+
+    const sql = `
+      SELECT s.empresa,
+             s.loja,
+             SUM(s.pecas)                  AS pecas,
+             SUM(s.pecas * m.custo_medio)  AS custo_medio,
+             MAX(m.atualizado_em)          AS saldo_atualizado_em
+      FROM estoque_saldo s
+      JOIN custo_medio_produto m
+        ON m.produto = s.produto
+       AND m.empresa = s.empresa
+      ${where}
+      GROUP BY s.empresa, s.loja
+      HAVING SUM(s.pecas) > 0
+      ORDER BY s.empresa, s.loja
+    `
+    try {
+      const r = await destPool.query<{
+        empresa: string; loja: string; pecas: string; custo_medio: string; saldo_atualizado_em: Date | null
+      }>(sql, vals)
+      return {
+        data: r.rows.map(row => ({
+          empresa: row.empresa,
+          loja: row.loja,
+          pecas: Number(row.pecas),
+          custo_medio: Number(row.custo_medio),
+        })),
+        saldo_atualizado_em: r.rows[0]?.saldo_atualizado_em ?? null,
+      }
+    } catch (err: any) {
+      if (err.code === '42P01') {
+        return reply.code(503).send({
+          error: 'custo_medio_produto ainda não materializada — rode `npm run refresh-custo-medio`',
+        })
+      }
+      return reply.code(400).send({ error: err.message })
+    }
+  })
 }
