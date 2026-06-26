@@ -10,6 +10,8 @@
 > lógica em [`backend/src/etl/custo-medio.ts`](backend/src/etl/custo-medio.ts)) e endpoint
 > `GET /api/estoque/custo-medio` ([`backend/src/api/routes/estoque.ts`](backend/src/api/routes/estoque.ts)).
 > Coluna de custo da linha em `estoques` auto-detectada (env `CUSTO_MEDIO_COL` p/ override).
+> Saldo clampado em 0 (estoque nunca negativo) — desvio robusto do §3 literal: dado incompleto
+> (saída sem a compra original na janela) deixava o saldo negativo e gerava custo médio negativo.
 > Falta validar os números contra o ERP no banco real (§5).
 
 ---

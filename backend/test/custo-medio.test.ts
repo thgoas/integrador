@@ -48,6 +48,26 @@ describe('custoMedioFinal — média móvel ponderada', () => {
     expect(custoMedioFinal([{ qtde: -3, compra: false, custoLinhaTotal: 1 }])).toBe(0)
   })
 
+  it('venda ANTES da compra (dado incompleto) não gera custo negativo', () => {
+    // sem o clamp daria cm = 50 / -5 = -10 (impossível). Com clamp: saldo zera, depois compra.
+    const cm = custoMedioFinal([
+      { qtde: -10, compra: false, custoLinhaTotal: 1 }, // saldo -10 → clampado a 0
+      { qtde: 5, compra: true, custoLinhaTotal: 50 },    // compra 5@10 → cm 10
+    ])
+    expect(cm).toBe(10)
+  })
+
+  it('saída maior que o saldo (peça-fantasma) zera e a compra seguinte fica positiva', () => {
+    // compra 10@10 (cm10); vende 15 (saldo iria a -5 → zera); compra 10@20 → cm 20
+    const cm = custoMedioFinal([
+      { qtde: 10, compra: true, custoLinhaTotal: 100 },
+      { qtde: -15, compra: false, custoLinhaTotal: 1 },
+      { qtde: 10, compra: true, custoLinhaTotal: 200 },
+    ])
+    expect(cm).toBe(20)
+    expect(cm).toBeGreaterThan(0)
+  })
+
   it('converge para o custo da última compra quando tudo é reposto a esse custo', () => {
     // compra 10@8 (cm=8); vende tudo (saldo 0, cm=8); compra 10@8 → cm=8
     const cm = custoMedioFinal([
