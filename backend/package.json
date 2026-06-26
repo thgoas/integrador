@@ -8,6 +8,7 @@
     "start": "node --experimental-sqlite --env-file=.env dist/index.js",
     "indexes": "node --env-file=.env dist/scripts/create-indexes.js",
     "refresh-saldo": "node --env-file=.env dist/scripts/refresh-estoque-saldo.js",
+    "refresh-custo-medio": "node --env-file=.env dist/scripts/refresh-custo-medio.js",
     "test": "vitest run",
     "test:watch": "vitest"
   },

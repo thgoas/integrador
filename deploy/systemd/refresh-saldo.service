@@ -1,5 +1,5 @@
 [Unit]
-Description=Refresh do saldo de estoque (estoque_saldo) do Integrador
+Description=Refresh das tabelas de estoque do Integrador (estoque_saldo + custo_medio_produto)
 Documentation=https://github.com/  # ajuste se quiser apontar p/ o repo
 # Garante que a rede/Postgres de destino esteja disponível antes de rodar.
 After=network-online.target

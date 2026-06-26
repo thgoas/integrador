@@ -26,9 +26,10 @@ cd backend && npm run test:watch # modo watch
 
 Cobertura na lógica pura (sem I/O) do ETL — `backend/test/`: `template.ts`
 (substituição de variáveis, `{{loja}}` como lista SQL), `periods.ts` (janelas
-day/week/month, bissexto, clamping) e `transform.ts` (applyMapping, resolveColumnTypes,
-runTransformScript). Camadas com I/O (loader/extractor/loaders pg) não têm testes.
-Os testes ficam fora de `src/`, então não entram no `tsc`/`dist`.
+day/week/month, bissexto, clamping), `transform.ts` (applyMapping, resolveColumnTypes,
+runTransformScript) e `custo-medio.ts` (média móvel ponderada: ponderação por compra,
+custo de venda ignorado, fronteiras de produto). Camadas com I/O (loader/extractor/loaders
+pg, scripts de refresh) não têm testes. Os testes ficam fora de `src/`, então não entram no `tsc`/`dist`.
 
 ### Índices no PostgreSQL de destino
 
@@ -79,6 +80,24 @@ Cron não herda o PATH interativo — se o `node` for via nvm/fnm, prefixe a lin
 Alternativa recomendada em produção: **systemd timer** (log no `journalctl`, `Persistent=true`
 para runs perdidos, sem dor de PATH). Units e instruções em [`deploy/systemd/`](deploy/systemd/).
 
+### Custo médio materializado
+
+Pré-calcula o **custo médio (média móvel ponderada)** por `(empresa, produto)` na tabela
+`custo_medio_produto`, que alimenta `GET /api/estoque/custo-medio` (ver seção dedicada):
+
+```bash
+cd backend && npm run build && npm run refresh-custo-medio
+```
+
+Faz um scan de `estoques` ordenado por `(empresa, produto, data)` via cursor e dobra cada
+produto em ordem cronológica ([`src/etl/custo-medio.ts`](backend/src/etl/custo-medio.ts)):
+só `compra = true` altera o custo; venda/transferência mexe só na quantidade (imune ao custo
+placeholder R$ 1 das saídas). Grava por build + swap atômico, igual ao saldo. A coluna de
+custo da linha em `estoques` é **auto-detectada** (`custo_total`→`custo_unitario`→`custo`;
+total-vs-unitário pelo nome) — override por env `CUSTO_MEDIO_COL` / `CUSTO_MEDIO_COL_TOTAL`;
+o run loga a escolha. Fonte: [`src/scripts/refresh-custo-medio.ts`](backend/src/scripts/refresh-custo-medio.ts).
+Agendar junto do `refresh-saldo` (mesmo wrapper/cron/systemd).
+
 ## Stack
 
 | Camada | Tecnologia |
@@ -107,7 +126,7 @@ backend/src/
       jobs.ts               # CRUD jobs + start/stop/reprocess
       runs.ts               # GET runs + polling de logs
       data.ts               # GET /data (lista tabelas), GET /data/:table/columns, GET /data/:table (filtros dinâmicos), POST /data/:table
-      estoque.ts            # GET /estoque/custo-atual — JOIN estoques×produtos agregado por (empresa, loja)
+      estoque.ts            # GET /estoque/custo-atual e /estoque/custo-medio — agregados por (empresa, loja)
       tokens.ts             # CRUD tokens de API — POST/GET/DELETE /auth/tokens
     sse.ts                  # broadcast SSE (mantido, sem subscribers ativos)
   db/
@@ -326,9 +345,28 @@ pelo ETL — e responde em milissegundos.
   vem `data` **histórica** (saldo a uma data passada, que o snapshot não cobre) **ou** quando
   `estoque_saldo` ainda não existe (`42P01`). Lento, mas correto; `saldo_atualizado_em` = `null`.
 
-A `estoque_saldo` é mantida por um **job de full refresh** (`TRUNCATE` + `INSERT…SELECT SUM(qtde)`
-dentro de transação) — ver seção "Saldo de estoque materializado". Integridade necessária:
-`(produto, empresa)` único após a expansão do catálogo, senão o `JOIN` infla a soma.
+A `estoque_saldo` é mantida por um **job de full refresh** (build + swap; CTAS `SUM(qtde)`)
+— ver seção "Saldo de estoque materializado". Integridade necessária: `(produto, empresa)`
+único após a expansão do catálogo, senão o `JOIN` infla a soma.
+
+## Endpoint de custo médio de estoque
+
+Custo médio (média móvel ponderada das **compras**) por loja — irmão do custo atual. Fonte:
+[`src/api/routes/estoque.ts`](backend/src/api/routes/estoque.ts); spec em [`SPEC-CUSTO-MEDIO-PRODUTO.md`](SPEC-CUSTO-MEDIO-PRODUTO.md).
+
+```
+GET /api/estoque/custo-medio?empresa=abys&loja=006
+→ { data: [{ empresa, loja, pecas, custo_medio }], saldo_atualizado_em }
+```
+
+- `JOIN estoque_saldo × custo_medio_produto` por `(empresa, produto)` — equi-join direto
+  (ambos single-valor; `custo_medio_produto.empresa` vem de `estoques`), `produto` numeric.
+- `custo_medio` = `SUM(pecas × custo_medio_produto.custo_medio)`, agregado por loja; só lojas
+  com `pecas > 0`. Params `empresa`/`loja` opcionais. Mesmo auth do custo atual (JWT ou `itg_`).
+- Depende da tabela `custo_medio_produto` (ver "Custo médio materializado"). Se ela não existir,
+  retorna **503** pedindo o refresh.
+- Validação esperada (spec §5): o médio deve ficar **próximo do custo atual** / ERP (~R$ 80/peça
+  na loja 006). Muito abaixo (~R$ 40-50) indica que a cronologia não está sendo aplicada.
 
 ## Tokens de API
 

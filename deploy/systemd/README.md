@@ -1,7 +1,9 @@
-# systemd timer — refresh do saldo de estoque
+# systemd timer — refresh das tabelas de estoque
 
-Agenda o `refresh-saldo` (recalcula `estoque_saldo`) 1x/dia às 03:00 no servidor de
-produção, como alternativa ao crontab. Usa o wrapper [`backend/scripts/refresh-saldo.sh`](../../backend/scripts/refresh-saldo.sh).
+Agenda 1x/dia às 03:00 o recálculo de `estoque_saldo` (custo atual) **e**
+`custo_medio_produto` (custo médio) no servidor de produção, como alternativa ao crontab.
+Usa o wrapper [`backend/scripts/refresh-saldo.sh`](../../backend/scripts/refresh-saldo.sh),
+que roda os dois scripts em sequência.
 
 ## Pré-requisitos (no servidor)
 
